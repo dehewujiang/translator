@@ -1,0 +1,6 @@
+=== TRANSLATION-FIRST BUILD 2026-10-24 15:03:43 ===
+build_command=python -m PyInstaller --noconfirm --clean 翻译小助手.spec
+build_exit=0
+artifact=翻译小助手.exe size=37550736 time=2026-10-24 15:03:30
+artifact=翻译小助手-上一版.exe size=37549779 time=2026-10-24 14:30:49
+launch=skipped (source app running, singleton port busy)

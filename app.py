@@ -231,6 +231,8 @@ class App:
         self._outside_watch = False
         self._mouse_was_down = False
         self._press_outside = False
+        self._source_expanded = False
+        self._source_compact_lines = 3
         self.settings_win = None
         self.tray_icon = None
 
@@ -244,26 +246,80 @@ class App:
         ttk.Button(topbar, text="配置", command=self.open_settings, width=6, takefocus=False, style="Small.TButton").pack(side="right")
         self._home_status()
 
-        # ---- 原文 + 译文：中间可拖分界线 ----
+        # ---- 译文（上）+ 原文（下）：译文优先 ----
         self.paned = ttk.PanedWindow(self.root, orient="vertical")
         self.paned.pack(fill="both", expand=True, padx=10)
-        pane_src = ttk.Frame(self.paned, style="TFrame")
-        ttk.Label(pane_src, text="原文", style="Title.TLabel").pack(anchor="w", pady=(2, 0))
-        self.src_text = tk.Text(pane_src, height=5, font=FONT, wrap="word", relief="flat", borderwidth=0, highlightthickness=1, highlightbackground="#e8e8e8", highlightcolor="#e8e8e8", background="white")
-        self.src_text.pack(fill="both", expand=True)
+
         pane_dst = ttk.Frame(self.paned, style="TFrame")
-        ttk.Label(pane_dst, text="译文", style="Title.TLabel").pack(anchor="w", pady=(6, 0))
-        self.dst_text = tk.Text(pane_dst, height=5, font=FONT, wrap="word", relief="flat", borderwidth=0, highlightthickness=1, highlightbackground="#e8e8e8", highlightcolor="#e8e8e8", background="white")
-        self.dst_text.pack(fill="both", expand=True)
-        self.paned.add(pane_src, weight=1)
+        dst_head = ttk.Frame(pane_dst, style="TFrame")
+        dst_head.pack(fill="x", pady=(2, 0))
+        ttk.Label(dst_head, text="译文", style="Title.TLabel").pack(side="left")
+        ttk.Button(
+            dst_head,
+            text="复制",
+            command=self.on_copy,
+            width=5,
+            takefocus=False,
+            style="Small.TButton",
+        ).pack(side="right")
+        dst_box = ttk.Frame(pane_dst, style="TFrame")
+        dst_box.pack(fill="both", expand=True)
+        self.dst_text = tk.Text(
+            dst_box,
+            height=5,
+            font=FONT,
+            wrap="word",
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground="#e8e8e8",
+            highlightcolor="#e8e8e8",
+            background="white",
+        )
+        dst_scroll = ttk.Scrollbar(dst_box, orient="vertical", command=self.dst_text.yview)
+        self.dst_text.configure(yscrollcommand=dst_scroll.set)
+        dst_scroll.pack(side="right", fill="y")
+        self.dst_text.pack(side="left", fill="both", expand=True)
         self.paned.add(pane_dst, weight=1)
 
-        # ---- 按钮行：只留一排翻译相关 ----
+        pane_src = ttk.Frame(self.paned, style="TFrame")
+        src_head = ttk.Frame(pane_src, style="TFrame")
+        src_head.pack(fill="x", pady=(6, 0))
+        ttk.Label(src_head, text="原文", style="Title.TLabel").pack(side="left")
+        self.expand_btn = ttk.Button(
+            src_head,
+            text="展开",
+            command=self._toggle_source,
+            width=5,
+            takefocus=False,
+            style="Small.TButton",
+        )
+        self.expand_btn.pack(side="right")
+        src_box = ttk.Frame(pane_src, style="TFrame")
+        src_box.pack(fill="both", expand=True)
+        self.src_text = tk.Text(
+            src_box,
+            height=3,
+            font=FONT,
+            wrap="word",
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground="#e8e8e8",
+            highlightcolor="#e8e8e8",
+            background="white",
+        )
+        src_scroll = ttk.Scrollbar(src_box, orient="vertical", command=self.src_text.yview)
+        self.src_text.configure(yscrollcommand=src_scroll.set)
+        src_scroll.pack(side="right", fill="y")
+        self.src_text.pack(side="left", fill="both", expand=True)
+        self.paned.add(pane_src, weight=1)
+
+        # ---- 按钮行：两个输入入口；复制在译文标题旁 ----
         btns1 = ttk.Frame(self.root, style="TFrame")
         btns1.pack(fill="x", padx=10, pady=(10, 10))
         ttk.Button(btns1, text="翻译剪贴板", command=self.on_manual, takefocus=False, style="Small.TButton").pack(side="left", padx=(0, 2))
         ttk.Button(btns1, text="翻译输入", command=self.on_input, style="Accent.TButton", takefocus=False).pack(side="left", padx=2)
-        ttk.Button(btns1, text="复制译文", command=self.on_copy, takefocus=False, style="Small.TButton").pack(side="left", padx=2)
 
         if not CORE_OK:
             self.dst_text.insert("1.0", "正在等待核心模块，请稍后再试（不要关闭）。")
@@ -430,13 +486,24 @@ class App:
             pass
         self._auto_split()
 
+    def _toggle_source(self):
+        self._source_expanded = not self._source_expanded
+        try:
+            self.expand_btn.configure(text="收起" if self._source_expanded else "展开")
+        except Exception:
+            pass
+        self._refit()
+
     def _fit_window_height(self):
         try:
             self.root.update_idletasks()
             行高 = tkfont.Font(font=FONT).metrics("linespace")
             屏高 = self.root.winfo_screenheight()
+            源行 = self._source_compact_lines
+            if self._source_expanded:
+                源行 = min(self._pane_lines(self.src_text), 10)
             self._window_h = _算窗口高度(
-                self._pane_lines(self.src_text),
+                源行,
                 self._pane_lines(self.dst_text),
                 行高,
                 屏高,
@@ -875,12 +942,13 @@ class App:
         short = text.strip()[:500].rstrip("\n") + "\n"
         self.src_text.delete("1.0", "end")
         self.src_text.insert("1.0", short)
+        self.src_text.see("1.0")
         self._run_translate(text.strip(), from_hotkey)
 
     def on_input(self):
         text = self.src_text.get("1.0", "end").strip()
         if not text:
-            self.status_var.set("上面框里先打字，再点翻译输入")
+            self.status_var.set("下面原文框里先打字，再点翻译输入")
             return
         self._run_translate(text, False)
 
@@ -900,7 +968,7 @@ class App:
         if self._need_config():
             self.popup()
             self.dst_text.delete("1.0", "end")
-            self.dst_text.insert("1.0", "请先点下面的配置按钮，填好钥匙并保存，然后再翻译。")
+            self.dst_text.insert("1.0", "请先点右上角的配置按钮，填好钥匙并保存，然后再翻译。")
             return
         取消 = threading.Event()
         self._cancel_event = 取消
@@ -939,6 +1007,7 @@ class App:
             self.popup()
         self.dst_text.delete("1.0", "end")
         self.dst_text.insert("1.0", 文本)
+        self.dst_text.see("1.0")
 
     def _finish_intent(self, 请求号, 结果):
         if 请求号 != self._request_id:
@@ -982,6 +1051,13 @@ class App:
         except Exception:
             self.dst_text.delete("1.0", "end")
             self.dst_text.insert("1.0", str(结果))
+        self._source_expanded = False
+        self._source_compact_lines = 1
+        try:
+            self.expand_btn.configure(text="展开")
+        except Exception:
+            pass
+        self.dst_text.see("1.0")
         self.popup()
         self._refit()
 
@@ -1014,16 +1090,20 @@ class App:
                 return
             行高 = tkfont.Font(font=FONT).metrics("linespace")
             题高 = tkfont.Font(font=TITLE_FONT).metrics("linespace")
-            想要 = _算原文高度(self._pane_pixels(self.src_text, 行高), 题高, 行高)
-            下限 = _算原文高度(行高, 题高, 行高)
-            上限 = int(total * 0.70)
-            self.paned.sashpos(0, min(上限, max(下限, 想要)))
+            if self._source_expanded:
+                源高 = _算原文高度(self._pane_pixels(self.src_text, 行高), 题高, 行高)
+            else:
+                源高 = _算原文高度(self._source_compact_lines * 行高, 题高, 行高)
+            源高 = min(源高, int(total * 0.70))
+            self.paned.sashpos(0, max(60, total - 源高))
         except Exception:
             pass
 
     def _show_text(self, 文本):
+        self._source_compact_lines = 3
         self.dst_text.delete("1.0", "end")
         self.dst_text.insert("1.0", 文本 or "没有拿到翻译结果")
+        self.dst_text.see("1.0")
         # 先弹出来再分：藏着时量不到高，自动分会被跳过
         self.popup()
         self._refit()
