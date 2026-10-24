@@ -1,0 +1,644 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 21a6459..2974302 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -8,6 +8,7 @@
+ |---|---|
+ | `translator_domain.py` | 契约层：意图（查词/翻译）与结果（译文/词典/失败）的类型，不联网、不读文件 |
+ | `translator_core.py` | 能力层：配置读写、调模型接口、结果归一化；唯一入口是 `run_intent` |
++| `translator_provider.py` | 接口驱动：OpenAI 兼容请求、SSE 流式、取消；不读配置、不碰界面 |
+ | `app.py` | 展示层：触发、剪贴板、配置窗、渲染、托盘；不判断词句、不拼提示词 |
+ | `tests/` | 标准库 unittest，全部离线；跑：`python -m unittest discover -s tests -v` |
+ | `docs/architecture-redesign.md` | 目标架构、契约、迁移顺序（第 2–4 步未做）、验收单 |
+@@ -15,7 +16,7 @@
+ 
+ ## 依赖方向
+ 
+-`app → core → domain`，不许反向；界面不 import requests，不拼 URL，不解析错误文字。
++`app → core → provider/domain`，不许反向；界面和 core 都不 import requests，不拼 URL，不解析错误文字。
+ 
+ ## 交付规矩
+ 
+diff --git a/app.py b/app.py
+index 3b7c607..f7ff555 100644
+--- a/app.py
++++ b/app.py
+@@ -2,7 +2,7 @@
+ [INPUT] 用户复制的英文剪贴板文本（Ctrl+C 复制后，轻点一下 Ctrl 触发）
+ [OUTPUT] 小弹窗显示中文翻译，可一键复制译文
+ [POS] 展示层/适配器：build_intent 把操作变成意图，run_intent 拿回结果，按类型渲染
+-[PROTOCOL] 启动隐藏 + Ctrl 轻点(<400ms)触发 + 1200ms 防抖；翻译放线程，译好才弹窗；关窗口=藏后台，退出按钮才真正退出；点窗口外面立刻藏起；托盘图标常驻右下角
++[PROTOCOL] 启动隐藏 + Ctrl 轻点(<400ms)触发 + 1200ms 防抖；请求号+取消事件（新的顶掉旧的）；流式首段回来才弹窗；关窗口=藏后台，退出才真正退出；点窗口外面立刻藏起；托盘图标常驻右下角
+ """
+ 
+ import socket
+@@ -202,7 +202,9 @@ class App:
+         self.keyboard_ok = False
+         self._ctrl_down_t = None
+         self._ctrl_combo = False
+-        self._translating = False
++        self._request_id = 0
++        self._cancel_event = None
++        self._popup_on_first_chunk = False
+         self.settings_win = None
+         self.tray_icon = None
+ 
+@@ -361,6 +363,8 @@ class App:
+         self._home_status()
+ 
+     def on_quit(self):
++        if self._cancel_event is not None:
++            self._cancel_event.set()
+         try:
+             if HAS_KEYBOARD:
+                 keyboard.unhook_all()
+@@ -719,8 +723,6 @@ class App:
+         return not (cfg.get("api_key") or "").strip()
+ 
+     def on_manual(self, from_hotkey=False):
+-        if self._translating:
+-            return
+         text = self.read_clip()
+         if not text or not text.strip():
+             self.popup()
+@@ -733,8 +735,6 @@ class App:
+         self._run_translate(text.strip(), from_hotkey)
+ 
+     def on_input(self):
+-        if self._translating:
+-            return
+         text = self.src_text.get("1.0", "end").strip()
+         if not text:
+             self.status_var.set("上面框里先打字，再点翻译输入")
+@@ -742,6 +742,11 @@ class App:
+         self._run_translate(text, False)
+ 
+     def _run_translate(self, text, from_hotkey):
++        self._request_id += 1
++        本号 = self._request_id
++        if self._cancel_event is not None:
++            self._cancel_event.set()
++        self._cancel_event = None
+         self.dst_text.delete("1.0", "end")
+         self.dst_text.insert("1.0", "翻译中，请稍等…")
+         if not CORE_OK or run_intent is None:
+@@ -754,26 +759,52 @@ class App:
+             self.dst_text.delete("1.0", "end")
+             self.dst_text.insert("1.0", "请先点下面的配置按钮，填好钥匙并保存，然后再翻译。")
+             return
++        取消 = threading.Event()
++        self._cancel_event = 取消
++        self._popup_on_first_chunk = bool(from_hotkey)
+         if not from_hotkey:
+-            # 手动点的就直接显示；快捷键触发的等译好再弹
++            # 手动点的就直接显示；快捷键触发的等第一段字回来再弹
+             self.popup()
+-        self._translating = True
++        self.status_var.set("正在翻译…")
+         意图 = build_intent(text)
+-        t = threading.Thread(target=self._do_intent, args=(意图,), daemon=True)
++        t = threading.Thread(
++            target=self._do_intent, args=(意图, 本号, 取消), daemon=True
++        )
+         t.start()
+ 
+-    def _do_intent(self, 意图):
++    def _do_intent(self, 意图, 请求号, 取消):
++        def 收到片段(文本):
++            try:
++                self.root.after(0, self._show_stream, 请求号, 文本)
++            except Exception:
++                pass
++
+         try:
+-            结果 = run_intent(意图)
++            结果 = run_intent(意图, on_chunk=收到片段, cancel=取消.is_set)
+         except Exception as e:
+             结果 = Failure("unknown", f"翻译失败：{e}")
+         try:
+-            self.root.after(0, self._show_result, 结果)
++            self.root.after(0, self._finish_intent, 请求号, 结果)
+         except Exception:
+-            self._translating = False
++            pass
++
++    def _show_stream(self, 请求号, 文本):
++        if 请求号 != self._request_id:
++            return
++        if self._popup_on_first_chunk:
++            self._popup_on_first_chunk = False
++            self.popup()
++        self.dst_text.delete("1.0", "end")
++        self.dst_text.insert("1.0", 文本)
++
++    def _finish_intent(self, 请求号, 结果):
++        if 请求号 != self._request_id:
++            return
++        self._popup_on_first_chunk = False
++        self._show_result(结果)
++        self._home_status()
+ 
+     def _show_dict(self, 结果):
+-        self._translating = False
+         try:
+             self.dst_text.tag_config("词", font=("微软雅黑", 15, "bold"))
+             self.dst_text.tag_config("音标", foreground="#666666")
+@@ -847,7 +878,6 @@ class App:
+             pass
+ 
+     def _show_text(self, 文本):
+-        self._translating = False
+         self.dst_text.delete("1.0", "end")
+         self.dst_text.insert("1.0", 文本 or "没有拿到翻译结果")
+         # 先弹出来再分：藏着时量不到高，自动分会被跳过
+diff --git a/docs/architecture-redesign.md b/docs/architecture-redesign.md
+index cebab5d..635a742 100644
+--- a/docs/architecture-redesign.md
++++ b/docs/architecture-redesign.md
+@@ -1,6 +1,6 @@
+ # 翻译小助手 · 架构重设计（意图与结果）
+ 
+-- 状态：第 1 步已实施，待用户按第 8 节验收
++- 状态：第 1–2 步已实施，待用户按第 8 节验收
+ - 日期：2026-10-24
+ - 任务级别：L2（同应用内多文件重构，可回退，无数据变更）
+ - 本文范围：目标架构 + 迁移顺序 + 第 1 步的验收证据；不包含第 2–5 步的实现
+@@ -133,8 +133,9 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ - **D3 词句判断归策略层**：将来加中文、代码、段落，只改 `build_intent`。
+ - **D4 `senses` 暂不拆成二层类型**：本步只切顶层契约；拆 `Sense`/`Example` 会牵动渲染，留到第 4 步。
+ - **D5 旧函数保留**：`translate_en_to_zh` 仍返回字符串；`lookup_word` 改为返回 `Definition`（仓库内只有 `app.py` 调用，已同步）。
+-- **D6 线程模型本步不动**：仍是“一次点击一个线程”。本步只让第 2 步的“单队列 + 取消”有地方落，不假装已经修好。
+-- **D7 不加依赖**：测试用标准库 `unittest`。
++- **D6 线程模型**：第 1 步不动；第 2 步改为“请求号 + 取消事件”，新的顶掉旧的。仍是一次请求一个线程，单队列未做（见 D8）。
++- **D7 不加依赖**：测试用标准库 `unittest`；HTTP 仍用已有 `requests`。
++- **D8 用请求号代替单队列**：行为等价（只有最后一次可见），实现更小；不做线程池/队列。
+ 
+ ---
+ 
+@@ -142,8 +143,8 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ 
+ | 步 | 做什么 | 怎么验证 | 怎么回退 |
+ |---|---|---|---|
+-| 1（本次） | domain 契约 + `build_intent` + `run_intent`；界面按 Result 渲染 | 单测（无网络）+ `py_compile` + 导入冒烟 + 人工验收 | 恢复 `app.py`、`translator_core.py`，删除 `translator_domain.py`、`tests/` |
+-| 2 | 供应商适配 + 单工作队列（新请求顶掉旧请求）+ 取消 + 流式 | 连点两次只显示最后一次；首字时间对比；断网/401/超时各一条单测 | 保留旧 `_call_api` 作为 fallback 开关 |
++| 1（已完成 2026-10-24） | domain 契约 + `build_intent` + `run_intent`；界面按 Result 渲染 | 单测（无网络）+ `py_compile` + 导入冒烟 + 人工验收 | 恢复 `app.py`、`translator_core.py`，删除 `translator_domain.py`、`tests/` |
++| 2（已完成 2026-10-24） | 供应商驱动 + 请求号/取消（新的顶掉旧的）+ 流式 | 9 条 provider 单测；真实接口首段 1165ms；连点人工验收 | 恢复 `app.py`、`translator_core.py`，删除 `translator_provider.py` 与对应测试 |
+ | 3 | 配置 schema + 版本号 + 原子写；密钥进系统凭据；配置移到用户数据目录 | 写一半模拟断电不坏；备份文件不含密钥；旧配置自动迁移 | 迁移前自动备份 `config.json`；保留读取旧格式 |
+ | 4 | 结果卡片：内容自适应，翻译/词典共用渲染；去掉 `_auto_split` | 三种内容（短词/长段/长词典）各截图对比；错位/溢出检查 | 保留旧窗口布局开关 |
+ | 5 | 打包与平台：按新模块重打 exe，确认配置持久化 | 关掉再开，方案还在；换机器可用 | 保留上一版 exe |
+@@ -152,7 +153,7 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ 
+ ---
+ 
+-## 6. 本次落地范围
++## 6. 第 1 步落地范围
+ 
+ ### 做
+ 
+@@ -191,7 +192,8 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ 3. 复制一段带路径的英文（如 `open C:\temp\a.txt now`）→ 轻点 Ctrl → □ 路径保持原样，不翻译。
+ 4. 点“配置” → 把钥匙改成一个错的 → 保存 → 翻译 → □ 提示密钥无效，且能点“配置”改回来。
+ 5. 断网后翻译 → □ 提示网络连接失败，不是白屏或英文报错。
+-6. 连点两次 Ctrl（内容不同）→ □ 窗口里是后一次的内容（本步不保证，第 2 步修；此项记录现状）。
++6. 在输入框打一段长英文 → 点“翻译输入” → 立刻换成另一段 → 再点“翻译输入” → □ 最终只显示后一次的内容，先一次不会覆盖回来。
++7. 翻译一段较长的英文 → □ 文字边生成边出现，不是等整段完成才一次性出现。
+ 
+ ---
+ 
+@@ -202,3 +204,24 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ - **适配器**：把一种输入翻译成另一种输入的外壳，本身不含业务判断。
+ - **原子写**：先写临时文件再整体替换，写一半断电不会留下半个坏文件。
+ - **流式**：模型边生成边往回吐字，不用等整段完成。
++
++## 10. 第 2 步落地记录（2026-10-24）
++
++### 做
++
++- 新增 `translator_provider.py`：OpenAI 兼容请求 + SSE 流式解析；401/404/429/5xx/断网/解析失败都转成 `Failure`。
++- `translator_core._call_api` 改走 provider，不再自己拼 URL；`run_intent` 把 `on_chunk` / `cancel` 传下去。
++- `app.py`：请求号 + 取消事件，新的请求顶掉旧的；热键触发时第一段字回来才弹窗；关程序时取消在途请求。
++
++### 验证
++
++- 单测 29 条全绿（新增 9 条 provider 测试：流式、取消、状态码、断网、解析、地址拼接）。
++- `py_compile` 5 个文件通过；导入冒烟 `CORE_OK=True`。
++- 真实接口冒烟：`Hello there, how are you?` 流式返回 5 段，首段 1165ms，总 1241ms。
++- UI 连点与首字显示需人工按第 8 节第 6、7 条验收。
++
++### 未做 / 偏差
++
++- 没做字面意义的单队列/线程池；用请求号 + 取消事件达到“只有最后一次可见”（D8）。
++- 没做超时专项单测（断网用例覆盖 `RequestException`）。
++
+diff --git a/tests/test_domain.py b/tests/test_domain.py
+index 45988c9..6b0bbfb 100644
+--- a/tests/test_domain.py
++++ b/tests/test_domain.py
+@@ -96,7 +96,7 @@ class 结果分派测试(unittest.TestCase):
+         self.assertEqual(调用记录, [])
+ 
+     def test_句子返回译文对象(self):
+-        translator_core._call_api = lambda _system, _user: "你好"
++        translator_core._call_api = lambda _system, _user, **_kwargs: "你好"
+         结果 = translator_core.run_intent(Intent("text", "hello"))
+         self.assertIsInstance(结果, Translation)
+         self.assertEqual(结果.text, "你好")
+@@ -106,7 +106,7 @@ class 结果分派测试(unittest.TestCase):
+             '{"word":"king","uk":"/kɪŋ/","us":"/kɪŋ/",'
+             '"senses":[{"pos":"n.","defs":["国王"],"examples":[]}]}'
+         )
+-        translator_core._call_api = lambda _system, _user: 载荷
++        translator_core._call_api = lambda _system, _user, **_kwargs: 载荷
+         结果 = translator_core.run_intent(Intent("word", "king"))
+         self.assertIsInstance(结果, Definition)
+         self.assertEqual(结果.word, "king")
+@@ -117,7 +117,7 @@ class 结果分派测试(unittest.TestCase):
+             '```json\n{"word":"king","uk":"","us":"",'
+             '"senses":[{"pos":"n.","defs":["国王"]}]}\n```'
+         )
+-        translator_core._call_api = lambda _system, _user: 载荷
++        translator_core._call_api = lambda _system, _user, **_kwargs: 载荷
+         结果 = translator_core.run_intent(Intent("word", "king"))
+         self.assertIsInstance(结果, Definition)
+ 
+@@ -142,7 +142,7 @@ class 结果分派测试(unittest.TestCase):
+         self.assertIn("炸了", 结果.message)
+ 
+     def test_词典返回格式不对时保留原文(self):
+-        translator_core._call_api = lambda _system, _user: "不是 json"
++        translator_core._call_api = lambda _system, _user, **_kwargs: "不是 json"
+         with self.assertRaises(Failure) as 捕获:
+             translator_core.lookup_word("king")
+         self.assertEqual(捕获.exception.kind, "parse")
+diff --git a/translator_core.py b/translator_core.py
+index c9db179..42c1447 100644
+--- a/translator_core.py
++++ b/translator_core.py
+@@ -1,29 +1,26 @@
+ """翻译核心：英文到中文的后端单元。
+ [INPUT] 英文文本 + config.json 当前方案（api_key / base_url / model / prompt）。
+ [OUTPUT] 译文 / 词典 / 类型化 Failure；界面只经 run_intent 进入。
+-[POS] 能力层：被 app.py 使用；向上不认识界面，向下依赖 translator_domain。
+-[PROTOCOL] 兼容 OpenAI 的聊天接口 POST {base_url}/chat/completions；老版单层 config.json 自动迁移。
++[POS] 能力层：被 app.py 使用；向上不认识界面，向下依赖 translator_domain 与 translator_provider。
++[PROTOCOL] 通过 translator_provider 调 OpenAI 兼容接口；老版单层 config.json 自动迁移。
+ """
+ 
+ import json
+ import os
+ 
+-import requests
+-
+ from translator_domain import (
+     CONFIG,
+     EMPTY,
+-    NETWORK,
+     PARSE,
+     WORD,
+     Definition,
+     Failure,
+     Intent,
+     Translation,
+-    failure_for_status,
+     classify_exception,
+     is_single_word,
+ )
++from translator_provider import chat as _驱动对话
+ 
+ 默认提示词 = "你是翻译，只返回中文译文，代码和路径不要翻译，保持原样。"
+ 默认接口地址 = "https://opencode.ai/inference/openai/v1"
+@@ -230,40 +227,23 @@ def delete_profile(name):
+     return 数据["current"]
+ 
+ 
+-def _call_api(系统提示, 用户内容):
+-    """调一次当前方案的接口，返回模型原文。地址模型缺时临时用默认，缺钥匙抛中文提示。"""
++def _call_api(系统提示, 用户内容, on_chunk=None, cancel=None):
++    """调一次当前方案的接口，返回模型原文。缺钥匙抛 CONFIG 失败。"""
+     配置 = load_config()
+     密钥 = str(配置.get("api_key", "")).strip()
+     接口地址 = _整理接口地址(配置.get("base_url", 默认接口地址))
+     模型 = str(配置.get("model", 默认模型)).strip() or 默认模型
+     if 密钥 == "":
+         raise Failure(CONFIG, "还没有设置密钥，请先打开配置填好密钥再翻译。")
+-    网址 = 接口地址 + "/chat/completions"
+-    请求头 = {
+-        "Authorization": "Bearer " + 密钥,
+-        "Content-Type": "application/json",
+-    }
+-    请求体 = {
+-        "model": 模型,
+-        "messages": [
+-            {"role": "system", "content": 系统提示},
+-            {"role": "user", "content": 用户内容},
+-        ],
+-    }
+-    try:
+-        回应 = requests.post(网址, headers=请求头, json=请求体, timeout=30)
+-    except requests.RequestException:
+-        raise Failure(NETWORK, "网络连接失败，请检查网络后重试。", True)
+-    if 回应.status_code != 200:
+-        raise failure_for_status(回应.status_code)
+-    try:
+-        数据 = 回应.json()
+-        内容 = 数据["choices"][0]["message"]["content"]
+-    except (ValueError, KeyError, IndexError, TypeError):
+-        raise Failure(PARSE, "翻译结果解析失败，请稍后重试。")
+-    if 内容 is None:
+-        return ""
+-    return str(内容).strip()
++    return _驱动对话(
++        接口地址,
++        密钥,
++        模型,
++        系统提示,
++        用户内容,
++        on_chunk=on_chunk,
++        cancel=cancel,
++    )
+ 
+ 
+ 单词指令 = (
+@@ -305,7 +285,7 @@ def lookup_word(word) -> Definition:
+     )
+ 
+ 
+-def translate_en_to_zh(text):
++def translate_en_to_zh(text, on_chunk=None, cancel=None):
+     """把英文翻译成中文，只返回中文译文（提示词来自当前方案的 prompt）。"""
+     # 空文本直接返回空，不调用接口
+     if text is None or str(text).strip() == "":
+@@ -313,10 +293,10 @@ def translate_en_to_zh(text):
+     原文 = str(text)
+     配置 = load_config()
+     提示词 = str(配置.get("prompt", "") or "").strip() or 默认提示词
+-    return _call_api(提示词, 原文)
++    return _call_api(提示词, 原文, on_chunk=on_chunk, cancel=cancel)
+ 
+ 
+-def run_intent(意图: Intent):
++def run_intent(意图: Intent, on_chunk=None, cancel=None):
+     """唯一入口：按意图分派，成功返回译文/词典，失败返回 Failure，不向界面抛异常。"""
+     文本 = str(getattr(意图, "text", "") or "").strip()
+     if 文本 == "":
+@@ -324,7 +304,7 @@ def run_intent(意图: Intent):
+     try:
+         if getattr(意图, "kind", "") == WORD:
+             return lookup_word(文本)
+-        return Translation(translate_en_to_zh(文本))
++        return Translation(translate_en_to_zh(文本, on_chunk=on_chunk, cancel=cancel))
+     except Failure as 失败:
+         return 失败
+     except Exception as 错误:
+diff --git "a/\344\275\277\347\224\250\350\257\264\346\230\216.txt" "b/\344\275\277\347\224\250\350\257\264\346\230\216.txt"
+index cb6dd75..5495d1d 100644
+--- "a/\344\275\277\347\224\250\350\257\264\346\230\216.txt"
++++ "b/\344\275\277\347\224\250\350\257\264\346\230\216.txt"
+@@ -14,6 +14,7 @@
+ 第一步：去别的地方，复制一段英文。
+ 第二步：轻轻点一下键盘左边的 Ctrl 键（点一下就松开，不要一直按）。
+ 第三步：翻译好的中文窗口会自动弹出来。
++长段落会边翻译边显示，先出来的字先看到，不用等整段完成。
+ 如果点 Ctrl 没反应，就在下面任务栏找到小窗口，点开后按“翻译剪贴板”按钮也一样。
+ 只想叫出窗口不翻译：按 Alt+Q，出来的是上次的内容。
+ 
+diff --git a/translator_provider.py b/translator_provider.py
+new file mode 100644
+index 0000000..c637b06
+--- /dev/null
++++ b/translator_provider.py
+@@ -0,0 +1,92 @@
++"""模型接口驱动：把一次请求发出去，把回来的字吐出来。
++
++[INPUT] 地址/密钥/模型 + 系统提示 + 用户内容 + 可选片段回调与取消信号。
++[OUTPUT] 完整文本；流式时每收到一段就回调累计文本。
++[POS] 能力层最外层；被 translator_core 调用，不认识界面与配置结构。
++[PROTOCOL] OpenAI 兼容 POST {base_url}/chat/completions；stream=true 时按 SSE 的 data: 行解析。
++"""
++
++import json
++
++import requests
++
++from translator_domain import NETWORK, PARSE, Failure, failure_for_status
++
++
++def chat(接口地址, 密钥, 模型, 系统提示, 用户内容, on_chunk=None, cancel=None):
++    """发一次请求。给了 on_chunk 就走流式，返回完整文本。"""
++    地址 = str(接口地址 or "").strip().rstrip("/") + "/chat/completions"
++    请求头 = {
++        "Authorization": "Bearer " + 密钥,
++        "Content-Type": "application/json",
++    }
++    请求体 = {
++        "model": 模型,
++        "messages": [
++            {"role": "system", "content": 系统提示},
++            {"role": "user", "content": 用户内容},
++        ],
++    }
++    流式 = on_chunk is not None
++    if 流式:
++        请求体["stream"] = True
++    try:
++        回应 = requests.post(
++            地址,
++            headers=请求头,
++            json=请求体,
++            timeout=(10, 60),
++            stream=流式,
++        )
++    except requests.RequestException:
++        raise Failure(NETWORK, "网络连接失败，请检查网络后重试。", True)
++    with 回应:
++        if 回应.status_code != 200:
++            raise failure_for_status(回应.status_code)
++        if 流式:
++            return _读流(回应, on_chunk, cancel)
++        return _读整段(回应)
++
++
++def _读整段(回应):
++    try:
++        数据 = 回应.json()
++        内容 = 数据["choices"][0]["message"]["content"]
++    except (ValueError, KeyError, IndexError, TypeError):
++        raise Failure(PARSE, "翻译结果解析失败，请稍后重试。")
++    if 内容 is None:
++        return ""
++    return str(内容).strip()
++
++
++def _读流(回应, on_chunk, cancel):
++    累计 = ""
++    for 原始行 in 回应.iter_lines(decode_unicode=True):
++        if cancel is not None and cancel():
++            break
++        if not 原始行:
++            continue
++        行 = 原始行.decode("utf-8", "replace") if isinstance(原始行, bytes) else 原始行
++        文本 = 行.strip()
++        if 文本.startswith("data:"):
++            文本 = 文本[5:].strip()
++        if 文本 == "[DONE]":
++            break
++        if not 文本:
++            continue
++        try:
++            数据 = json.loads(文本)
++        except ValueError:
++            continue
++        增量 = _取增量(数据)
++        if 增量:
++            累计 += 增量
++            on_chunk(累计)
++    return 累计.strip()
++
++
++def _取增量(数据):
++    try:
++        return 数据["choices"][0]["delta"].get("content") or ""
++    except (KeyError, IndexError, TypeError, AttributeError):
++        return ""
+diff --git a/tests/test_provider.py b/tests/test_provider.py
+new file mode 100644
+index 0000000..fad1a3e
+--- /dev/null
++++ b/tests/test_provider.py
+@@ -0,0 +1,136 @@
++"""模型接口驱动的单元测试。
++
++[INPUT] 假 HTTP 回应与假 SSE 行，不联网。
++[OUTPUT] unittest 断言；覆盖非流式、流式回调、取消、状态码、解析失败。
++[POS] 守护 translator_provider.chat 的协议边界。
++[PROTOCOL] 运行：python -m unittest discover -s tests -v
++"""
++
++import unittest
++from unittest import mock
++
++import translator_provider
++from translator_domain import Failure
++
++
++class 假回应:
++    def __init__(self, status=200, payload=None, lines=None):
++        self.status_code = status
++        self._payload = payload
++        self._lines = lines or []
++        self.closed = False
++
++    def __enter__(self):
++        return self
++
++    def __exit__(self, *_args):
++        self.closed = True
++
++    def json(self):
++        return self._payload
++
++    def iter_lines(self, decode_unicode=False):
++        for 行 in self._lines:
++            yield 行
++
++
++def 流式行(*片段):
++    行 = []
++    for 片段内容 in 片段:
++        行.append('data: {"choices":[{"delta":{"content":"' + 片段内容 + '"}}]}')
++    行.append("data: [DONE]")
++    return 行
++
++
++class 请求测试(unittest.TestCase):
++    def setUp(self):
++        self._原post = translator_provider.requests.post
++
++    def tearDown(self):
++        translator_provider.requests.post = self._原post
++
++    def _发请求(self, 回应, **kwargs):
++        self.发送 = mock.Mock(return_value=回应)
++        translator_provider.requests.post = self.发送
++        return translator_provider.chat(
++            "https://example.com/v1/",
++            "key",
++            "model",
++            "系统提示",
++            "用户内容",
++            **kwargs,
++        )
++
++    def test_非流式返回去掉两端空白(self):
++        结果 = self._发请求(假回应(payload={"choices": [{"message": {"content": " 你好 "}}]}))
++        self.assertEqual(结果, "你好")
++        self.assertFalse(self.发送.call_args.kwargs["stream"])
++
++    def test_流式逐段回调累计文本(self):
++        片段 = []
++        结果 = self._发请求(
++            假回应(lines=流式行("你", "好")),
++            on_chunk=片段.append,
++        )
++        self.assertEqual(结果, "你好")
++        self.assertEqual(片段, ["你", "你好"])
++        self.assertTrue(self.发送.call_args.kwargs["stream"])
++
++    def test_流式忽略空行坏行和事件行(self):
++        行 = [
++            "",
++            "event: ping",
++            "data: not-json",
++            'data: {"choices":[{"delta":{"content":"好"}}]}',
++            "data: [DONE]",
++            'data: {"choices":[{"delta":{"content":"不该出现"}}]}',
++        ]
++        片段 = []
++        结果 = self._发请求(假回应(lines=行), on_chunk=片段.append)
++        self.assertEqual(结果, "好")
++        self.assertEqual(片段, ["好"])
++
++    def test_取消后不再继续读流(self):
++        片段 = []
++        取消 = mock.Mock(return_value=False)
++        取消.side_effect = [False, True, True]
++
++        结果 = self._发请求(
++            假回应(lines=流式行("你", "好")),
++            on_chunk=片段.append,
++            cancel=取消,
++        )
++        self.assertEqual(结果, "你")
++        self.assertEqual(片段, ["你"])
++
++    def test_401抛密钥失败(self):
++        with self.assertRaises(Failure) as 捕获:
++            self._发请求(假回应(status=401, payload={}))
++        self.assertEqual(捕获.exception.kind, "auth")
++        self.assertFalse(捕获.exception.retryable)
++
++    def test_网络异常抛网络失败(self):
++        self.发送 = mock.Mock(side_effect=translator_provider.requests.RequestException("断网"))
++        translator_provider.requests.post = self.发送
++        with self.assertRaises(Failure) as 捕获:
++            translator_provider.chat("https://x/v1", "k", "m", "s", "u")
++        self.assertEqual(捕获.exception.kind, "network")
++        self.assertTrue(捕获.exception.retryable)
++
++    def test_返回结构不对抛解析失败(self):
++        with self.assertRaises(Failure) as 捕获:
++            self._发请求(假回应(payload={"choices": []}))
++        self.assertEqual(捕获.exception.kind, "parse")
++
++    def test_接口地址末尾斜杠不会拼出双斜杠(self):
++        self._发请求(假回应(payload={"choices": [{"message": {"content": "好"}}]}))
++        地址 = self.发送.call_args.args[0]
++        self.assertEqual(地址, "https://example.com/v1/chat/completions")
++
++    def test_内容为空返回空串(self):
++        结果 = self._发请求(假回应(payload={"choices": [{"message": {"content": None}}]}))
++        self.assertEqual(结果, "")
++
++
++if __name__ == "__main__":
++    unittest.main(verbosity=2)

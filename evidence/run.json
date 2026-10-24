@@ -1,54 +1,63 @@
 {
-  "task": "架构重设计第 1 步：把意图与结果从界面抽出",
+  "task": "架构重设计第 2 步：模型驱动 + 流式 + 新的顶掉旧的",
   "level": "L2",
   "date": "2026-10-24",
-  "started_at": "2026-10-24T13:13:48+08:00",
-  "finished_at": "2026-10-24T13:18:30+08:00",
-  "checkpoint": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\opencode\\translator-checkpoint-20261024-131348",
-  "before_snapshot": [
-    "evidence/before/app.py",
-    "evidence/before/translator_core.py"
-  ],
+  "base_commit": "8f4b8a3",
   "changed_files": [
     {
-      "path": "translator_domain.py",
+      "path": "translator_provider.py",
       "change": "added",
-      "note": "Intent/Translation/Definition/Failure + 词句判定 + 失败分类"
+      "note": "OpenAI 兼容请求 + SSE 流式 + 取消；状态码/断网/解析失败转 Failure"
     },
     {
       "path": "translator_core.py",
       "change": "modified",
-      "note": "_call_api 抛类型化失败；新增 run_intent；lookup_word 返回 Definition；删除重复的 is_single_word"
+      "note": "_call_api 改走 provider；run_intent 传 on_chunk/cancel；不再 import requests"
     },
     {
       "path": "app.py",
       "change": "modified",
-      "note": "统一走 build_intent/run_intent；按 Result 类型渲染；删除字符串嗅探与双 worker"
+      "note": "请求号+取消事件；新的顶掉旧的；首段回来才弹窗；关程序取消在途请求"
     },
     {
-      "path": "tests/__init__.py",
+      "path": "tests/test_provider.py",
       "change": "added",
-      "note": ""
+      "note": "9 条：流式、取消、401、断网、解析、地址拼接、空内容"
     },
     {
       "path": "tests/test_domain.py",
-      "change": "added",
-      "note": "20 条单测，不联网"
+      "change": "modified",
+      "note": "假接口签名接受 on_chunk/cancel 关键字"
     },
     {
       "path": "docs/architecture-redesign.md",
-      "change": "added",
-      "note": "目标架构、契约、迁移顺序、验收单"
+      "change": "modified",
+      "note": "第 2 步落地记录、D8、验收单 6/7 条"
+    },
+    {
+      "path": "AGENTS.md",
+      "change": "modified",
+      "note": "补 translator_provider 与依赖方向"
+    },
+    {
+      "path": "使用说明.txt",
+      "change": "modified",
+      "note": "说明长段落边生成边显示"
     },
     {
       "path": "evidence/test.log",
       "change": "updated",
-      "note": "红/绿/终验输出"
+      "note": "第 2 步红/绿/终验"
     },
     {
-      "path": "evidence/diff.patch",
+      "path": "evidence/live-smoke.log",
       "change": "added",
-      "note": "改动前快照与当前文件的逐行差异"
+      "note": "真实接口流式冒烟，只记录指标"
+    },
+    {
+      "path": "evidence/diff-step2.patch",
+      "change": "added",
+      "note": "第 2 步逐行差异"
     },
     {
       "path": "evidence/run.json",
@@ -66,46 +75,52 @@
       "cmd": "python -m unittest discover -s tests -v",
       "phase": "RED",
       "exit": 1,
-      "result": "ModuleNotFoundError: translator_domain"
+      "result": "ModuleNotFoundError: translator_provider"
     },
     {
       "cmd": "python -m unittest discover -s tests -v",
       "phase": "GREEN",
       "exit": 0,
-      "result": "20 tests OK"
+      "result": "29 tests OK"
     },
     {
       "cmd": "python -m unittest discover -s tests -v",
       "phase": "FINAL",
       "exit": 0,
-      "result": "20 tests OK"
+      "result": "29 tests OK"
     },
     {
-      "cmd": "python -m py_compile app.py translator_core.py translator_domain.py tests/test_domain.py",
+      "cmd": "python -m py_compile app.py translator_core.py translator_domain.py translator_provider.py tests/test_domain.py tests/test_provider.py",
       "phase": "FINAL",
       "exit": 0,
       "result": "no syntax errors"
     },
     {
-      "cmd": "python -c \"import app, translator_core, translator_domain; print(...)\"",
+      "cmd": "python -c \"... run_intent(Intent('text', ...), on_chunk=...) ...\"",
+      "phase": "LIVE",
+      "exit": 0,
+      "result": "first_chunk_ms=1543, chunks=7, chars=10, elapsed_ms=1594"
+    },
+    {
+      "cmd": "python -c \"import app, translator_core, translator_provider; print(...)\"",
       "phase": "FINAL",
       "exit": 0,
-      "result": "CORE_OK=True; word/text routing OK; is_single_word 只有一份实现"
+      "result": "CORE_OK=True"
     }
   ],
   "tests": {
-    "total": 20,
-    "passed": 20,
+    "total": 29,
+    "passed": 29,
     "failed": 0,
-    "network_used": false
+    "network_used_in_tests": false,
+    "live_smoke": true
   },
   "not_done": [
-    "线程模型（单队列/取消）",
-    "供应商适配与流式",
-    "配置 schema/原子写/系统凭据",
-    "结果卡片与自适应布局",
-    "重打 exe",
-    "UI 人工验收"
+    "UI 连点与首字显示人工验收",
+    "字面意义的单队列/线程池（用请求号替代，见 D8）",
+    "第 3 步：配置迁移与密钥加密",
+    "第 4 步：结果卡片",
+    "第 5 步：重打 exe"
   ],
-  "verification_gaps": "界面渲染只做了导入冒烟，真实弹窗需按 docs/architecture-redesign.md 第 8 节人工过一遍"
+  "verification_gaps": "流式与取消由 9 条假 SSE 单测覆盖；真实供应商只做过一次短视频冒烟；UI 行为需按文档第 8 节第 6/7 条人工验收"
 }

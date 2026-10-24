@@ -2,7 +2,7 @@
 [INPUT] 用户复制的英文剪贴板文本（Ctrl+C 复制后，轻点一下 Ctrl 触发）
 [OUTPUT] 小弹窗显示中文翻译，可一键复制译文
 [POS] 展示层/适配器：build_intent 把操作变成意图，run_intent 拿回结果，按类型渲染
-[PROTOCOL] 启动隐藏 + Ctrl 轻点(<400ms)触发 + 1200ms 防抖；翻译放线程，译好才弹窗；关窗口=藏后台，退出按钮才真正退出；点窗口外面立刻藏起；托盘图标常驻右下角
+[PROTOCOL] 启动隐藏 + Ctrl 轻点(<400ms)触发 + 1200ms 防抖；请求号+取消事件（新的顶掉旧的）；流式首段回来才弹窗；关窗口=藏后台，退出才真正退出；点窗口外面立刻藏起；托盘图标常驻右下角
 """
 
 import socket
@@ -202,7 +202,9 @@ class App:
         self.keyboard_ok = False
         self._ctrl_down_t = None
         self._ctrl_combo = False
-        self._translating = False
+        self._request_id = 0
+        self._cancel_event = None
+        self._popup_on_first_chunk = False
         self.settings_win = None
         self.tray_icon = None
 
@@ -361,6 +363,8 @@ class App:
         self._home_status()
 
     def on_quit(self):
+        if self._cancel_event is not None:
+            self._cancel_event.set()
         try:
             if HAS_KEYBOARD:
                 keyboard.unhook_all()
@@ -719,8 +723,6 @@ class App:
         return not (cfg.get("api_key") or "").strip()
 
     def on_manual(self, from_hotkey=False):
-        if self._translating:
-            return
         text = self.read_clip()
         if not text or not text.strip():
             self.popup()
@@ -733,8 +735,6 @@ class App:
         self._run_translate(text.strip(), from_hotkey)
 
     def on_input(self):
-        if self._translating:
-            return
         text = self.src_text.get("1.0", "end").strip()
         if not text:
             self.status_var.set("上面框里先打字，再点翻译输入")
@@ -742,6 +742,11 @@ class App:
         self._run_translate(text, False)
 
     def _run_translate(self, text, from_hotkey):
+        self._request_id += 1
+        本号 = self._request_id
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+        self._cancel_event = None
         self.dst_text.delete("1.0", "end")
         self.dst_text.insert("1.0", "翻译中，请稍等…")
         if not CORE_OK or run_intent is None:
@@ -754,26 +759,52 @@ class App:
             self.dst_text.delete("1.0", "end")
             self.dst_text.insert("1.0", "请先点下面的配置按钮，填好钥匙并保存，然后再翻译。")
             return
+        取消 = threading.Event()
+        self._cancel_event = 取消
+        self._popup_on_first_chunk = bool(from_hotkey)
         if not from_hotkey:
-            # 手动点的就直接显示；快捷键触发的等译好再弹
+            # 手动点的就直接显示；快捷键触发的等第一段字回来再弹
             self.popup()
-        self._translating = True
+        self.status_var.set("正在翻译…")
         意图 = build_intent(text)
-        t = threading.Thread(target=self._do_intent, args=(意图,), daemon=True)
+        t = threading.Thread(
+            target=self._do_intent, args=(意图, 本号, 取消), daemon=True
+        )
         t.start()
 
-    def _do_intent(self, 意图):
+    def _do_intent(self, 意图, 请求号, 取消):
+        def 收到片段(文本):
+            try:
+                self.root.after(0, self._show_stream, 请求号, 文本)
+            except Exception:
+                pass
+
         try:
-            结果 = run_intent(意图)
+            结果 = run_intent(意图, on_chunk=收到片段, cancel=取消.is_set)
         except Exception as e:
             结果 = Failure("unknown", f"翻译失败：{e}")
         try:
-            self.root.after(0, self._show_result, 结果)
+            self.root.after(0, self._finish_intent, 请求号, 结果)
         except Exception:
-            self._translating = False
+            pass
+
+    def _show_stream(self, 请求号, 文本):
+        if 请求号 != self._request_id:
+            return
+        if self._popup_on_first_chunk:
+            self._popup_on_first_chunk = False
+            self.popup()
+        self.dst_text.delete("1.0", "end")
+        self.dst_text.insert("1.0", 文本)
+
+    def _finish_intent(self, 请求号, 结果):
+        if 请求号 != self._request_id:
+            return
+        self._popup_on_first_chunk = False
+        self._show_result(结果)
+        self._home_status()
 
     def _show_dict(self, 结果):
-        self._translating = False
         try:
             self.dst_text.tag_config("词", font=("微软雅黑", 15, "bold"))
             self.dst_text.tag_config("音标", foreground="#666666")
@@ -847,7 +878,6 @@ class App:
             pass
 
     def _show_text(self, 文本):
-        self._translating = False
         self.dst_text.delete("1.0", "end")
         self.dst_text.insert("1.0", 文本 or "没有拿到翻译结果")
         # 先弹出来再分：藏着时量不到高，自动分会被跳过

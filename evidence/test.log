@@ -82,3 +82,116 @@ import ok, CORE_OK= True
 word= word text= text
 same_fn= True
 smoke exit=0
+
+=== STEP2 RED 2026-10-24 13:26:03 ===
+test_401是密钥问题且不可重试 (test_domain.失败分类测试.test_401是密钥问题且不可重试) ... ok
+test_404是地址或模型问题 (test_domain.失败分类测试.test_404是地址或模型问题) ... ok
+test_429是限流且可重试 (test_domain.失败分类测试.test_429是限流且可重试) ... ok
+test_500是服务端问题且可重试 (test_domain.失败分类测试.test_500是服务端问题且可重试) ... ok
+test_其他状态码归服务端 (test_domain.失败分类测试.test_其他状态码归服务端) ... ok
+test_单词返回词典对象 (test_domain.结果分派测试.test_单词返回词典对象) ... ok
+test_句子返回译文对象 (test_domain.结果分派测试.test_句子返回译文对象) ... ok
+test_已知失败原样传递 (test_domain.结果分派测试.test_已知失败原样传递) ... ok
+test_未知异常收敛成失败对象 (test_domain.结果分派测试.test_未知异常收敛成失败对象) ... ok
+test_空文本不调接口 (test_domain.结果分派测试.test_空文本不调接口) ... ok
+test_词典带代码围栏也能解析 (test_domain.结果分派测试.test_词典带代码围栏也能解析) ... ok
+test_词典返回格式不对时保留原文 (test_domain.结果分派测试.test_词典返回格式不对时保留原文) ... ok
+test_两边标点会去掉 (test_domain.词句判定测试.test_两边标点会去掉) ... ok
+test_中文不是单词 (test_domain.词句判定测试.test_中文不是单词) ... ok
+test_单个字母不算单词 (test_domain.词句判定测试.test_单个字母不算单词) ... ok
+test_句子走翻译 (test_domain.词句判定测试.test_句子走翻译) ... ok
+test_撇号和连字符算单词 (test_domain.词句判定测试.test_撇号和连字符算单词) ... ok
+test_数字不是单词 (test_domain.词句判定测试.test_数字不是单词) ... ok
+test_普通单词走词典 (test_domain.词句判定测试.test_普通单词走词典) ... ok
+test_空文本保留为空 (test_domain.词句判定测试.test_空文本保留为空) ... ok
+test_provider (unittest.loader._FailedTest.test_provider) ... ERROR
+======================================================================
+ERROR: test_provider (unittest.loader._FailedTest.test_provider)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_provider
+Traceback (most recent call last):
+  File "C:\Python313\Lib\unittest\loader.py", line 396, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "C:\Python313\Lib\unittest\loader.py", line 339, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "D:\10_project\translator\tests\test_provider.py", line 12, in <module>
+    import translator_provider
+ModuleNotFoundError: No module named 'translator_provider'
+----------------------------------------------------------------------
+Ran 21 tests in 0.001s
+FAILED (errors=1)
+exit=1
+
+=== STEP2 GREEN 2026-10-24 13:27:10 ===
+test_401是密钥问题且不可重试 (test_domain.失败分类测试.test_401是密钥问题且不可重试) ... ok
+test_404是地址或模型问题 (test_domain.失败分类测试.test_404是地址或模型问题) ... ok
+test_429是限流且可重试 (test_domain.失败分类测试.test_429是限流且可重试) ... ok
+test_500是服务端问题且可重试 (test_domain.失败分类测试.test_500是服务端问题且可重试) ... ok
+test_其他状态码归服务端 (test_domain.失败分类测试.test_其他状态码归服务端) ... ok
+test_单词返回词典对象 (test_domain.结果分派测试.test_单词返回词典对象) ... ok
+test_句子返回译文对象 (test_domain.结果分派测试.test_句子返回译文对象) ... ok
+test_已知失败原样传递 (test_domain.结果分派测试.test_已知失败原样传递) ... ok
+test_未知异常收敛成失败对象 (test_domain.结果分派测试.test_未知异常收敛成失败对象) ... ok
+test_空文本不调接口 (test_domain.结果分派测试.test_空文本不调接口) ... ok
+test_词典带代码围栏也能解析 (test_domain.结果分派测试.test_词典带代码围栏也能解析) ... ok
+test_词典返回格式不对时保留原文 (test_domain.结果分派测试.test_词典返回格式不对时保留原文) ... ok
+test_两边标点会去掉 (test_domain.词句判定测试.test_两边标点会去掉) ... ok
+test_中文不是单词 (test_domain.词句判定测试.test_中文不是单词) ... ok
+test_单个字母不算单词 (test_domain.词句判定测试.test_单个字母不算单词) ... ok
+test_句子走翻译 (test_domain.词句判定测试.test_句子走翻译) ... ok
+test_撇号和连字符算单词 (test_domain.词句判定测试.test_撇号和连字符算单词) ... ok
+test_数字不是单词 (test_domain.词句判定测试.test_数字不是单词) ... ok
+test_普通单词走词典 (test_domain.词句判定测试.test_普通单词走词典) ... ok
+test_空文本保留为空 (test_domain.词句判定测试.test_空文本保留为空) ... ok
+test_401抛密钥失败 (test_provider.请求测试.test_401抛密钥失败) ... ok
+test_内容为空返回空串 (test_provider.请求测试.test_内容为空返回空串) ... ok
+test_取消后不再继续读流 (test_provider.请求测试.test_取消后不再继续读流) ... ok
+test_接口地址末尾斜杠不会拼出双斜杠 (test_provider.请求测试.test_接口地址末尾斜杠不会拼出双斜杠) ... ok
+test_流式忽略空行坏行和事件行 (test_provider.请求测试.test_流式忽略空行坏行和事件行) ... ok
+test_流式逐段回调累计文本 (test_provider.请求测试.test_流式逐段回调累计文本) ... ok
+test_网络异常抛网络失败 (test_provider.请求测试.test_网络异常抛网络失败) ... ok
+test_返回结构不对抛解析失败 (test_provider.请求测试.test_返回结构不对抛解析失败) ... ok
+test_非流式返回去掉两端空白 (test_provider.请求测试.test_非流式返回去掉两端空白) ... ok
+----------------------------------------------------------------------
+Ran 29 tests in 0.003s
+OK
+exit=0
+
+=== STEP2 FINAL 2026-10-24 13:29:42 ===
+test_401是密钥问题且不可重试 (test_domain.失败分类测试.test_401是密钥问题且不可重试) ... ok
+test_404是地址或模型问题 (test_domain.失败分类测试.test_404是地址或模型问题) ... ok
+test_429是限流且可重试 (test_domain.失败分类测试.test_429是限流且可重试) ... ok
+test_500是服务端问题且可重试 (test_domain.失败分类测试.test_500是服务端问题且可重试) ... ok
+test_其他状态码归服务端 (test_domain.失败分类测试.test_其他状态码归服务端) ... ok
+test_单词返回词典对象 (test_domain.结果分派测试.test_单词返回词典对象) ... ok
+test_句子返回译文对象 (test_domain.结果分派测试.test_句子返回译文对象) ... ok
+test_已知失败原样传递 (test_domain.结果分派测试.test_已知失败原样传递) ... ok
+test_未知异常收敛成失败对象 (test_domain.结果分派测试.test_未知异常收敛成失败对象) ... ok
+test_空文本不调接口 (test_domain.结果分派测试.test_空文本不调接口) ... ok
+test_词典带代码围栏也能解析 (test_domain.结果分派测试.test_词典带代码围栏也能解析) ... ok
+test_词典返回格式不对时保留原文 (test_domain.结果分派测试.test_词典返回格式不对时保留原文) ... ok
+test_两边标点会去掉 (test_domain.词句判定测试.test_两边标点会去掉) ... ok
+test_中文不是单词 (test_domain.词句判定测试.test_中文不是单词) ... ok
+test_单个字母不算单词 (test_domain.词句判定测试.test_单个字母不算单词) ... ok
+test_句子走翻译 (test_domain.词句判定测试.test_句子走翻译) ... ok
+test_撇号和连字符算单词 (test_domain.词句判定测试.test_撇号和连字符算单词) ... ok
+test_数字不是单词 (test_domain.词句判定测试.test_数字不是单词) ... ok
+test_普通单词走词典 (test_domain.词句判定测试.test_普通单词走词典) ... ok
+test_空文本保留为空 (test_domain.词句判定测试.test_空文本保留为空) ... ok
+test_401抛密钥失败 (test_provider.请求测试.test_401抛密钥失败) ... ok
+test_内容为空返回空串 (test_provider.请求测试.test_内容为空返回空串) ... ok
+test_取消后不再继续读流 (test_provider.请求测试.test_取消后不再继续读流) ... ok
+test_接口地址末尾斜杠不会拼出双斜杠 (test_provider.请求测试.test_接口地址末尾斜杠不会拼出双斜杠) ... ok
+test_流式忽略空行坏行和事件行 (test_provider.请求测试.test_流式忽略空行坏行和事件行) ... ok
+test_流式逐段回调累计文本 (test_provider.请求测试.test_流式逐段回调累计文本) ... ok
+test_网络异常抛网络失败 (test_provider.请求测试.test_网络异常抛网络失败) ... ok
+test_返回结构不对抛解析失败 (test_provider.请求测试.test_返回结构不对抛解析失败) ... ok
+test_非流式返回去掉两端空白 (test_provider.请求测试.test_非流式返回去掉两端空白) ... ok
+----------------------------------------------------------------------
+Ran 29 tests in 0.004s
+OK
+exit=0
+py_compile exit=0
+import ok True
+smoke exit=0

@@ -96,7 +96,7 @@ class 结果分派测试(unittest.TestCase):
         self.assertEqual(调用记录, [])
 
     def test_句子返回译文对象(self):
-        translator_core._call_api = lambda _system, _user: "你好"
+        translator_core._call_api = lambda _system, _user, **_kwargs: "你好"
         结果 = translator_core.run_intent(Intent("text", "hello"))
         self.assertIsInstance(结果, Translation)
         self.assertEqual(结果.text, "你好")
@@ -106,7 +106,7 @@ class 结果分派测试(unittest.TestCase):
             '{"word":"king","uk":"/kɪŋ/","us":"/kɪŋ/",'
             '"senses":[{"pos":"n.","defs":["国王"],"examples":[]}]}'
         )
-        translator_core._call_api = lambda _system, _user: 载荷
+        translator_core._call_api = lambda _system, _user, **_kwargs: 载荷
         结果 = translator_core.run_intent(Intent("word", "king"))
         self.assertIsInstance(结果, Definition)
         self.assertEqual(结果.word, "king")
@@ -117,7 +117,7 @@ class 结果分派测试(unittest.TestCase):
             '```json\n{"word":"king","uk":"","us":"",'
             '"senses":[{"pos":"n.","defs":["国王"]}]}\n```'
         )
-        translator_core._call_api = lambda _system, _user: 载荷
+        translator_core._call_api = lambda _system, _user, **_kwargs: 载荷
         结果 = translator_core.run_intent(Intent("word", "king"))
         self.assertIsInstance(结果, Definition)
 
@@ -142,7 +142,7 @@ class 结果分派测试(unittest.TestCase):
         self.assertIn("炸了", 结果.message)
 
     def test_词典返回格式不对时保留原文(self):
-        translator_core._call_api = lambda _system, _user: "不是 json"
+        translator_core._call_api = lambda _system, _user, **_kwargs: "不是 json"
         with self.assertRaises(Failure) as 捕获:
             translator_core.lookup_word("king")
         self.assertEqual(捕获.exception.kind, "parse")

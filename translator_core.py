@@ -1,29 +1,26 @@
 """翻译核心：英文到中文的后端单元。
 [INPUT] 英文文本 + config.json 当前方案（api_key / base_url / model / prompt）。
 [OUTPUT] 译文 / 词典 / 类型化 Failure；界面只经 run_intent 进入。
-[POS] 能力层：被 app.py 使用；向上不认识界面，向下依赖 translator_domain。
-[PROTOCOL] 兼容 OpenAI 的聊天接口 POST {base_url}/chat/completions；老版单层 config.json 自动迁移。
+[POS] 能力层：被 app.py 使用；向上不认识界面，向下依赖 translator_domain 与 translator_provider。
+[PROTOCOL] 通过 translator_provider 调 OpenAI 兼容接口；老版单层 config.json 自动迁移。
 """
 
 import json
 import os
 
-import requests
-
 from translator_domain import (
     CONFIG,
     EMPTY,
-    NETWORK,
     PARSE,
     WORD,
     Definition,
     Failure,
     Intent,
     Translation,
-    failure_for_status,
     classify_exception,
     is_single_word,
 )
+from translator_provider import chat as _驱动对话
 
 默认提示词 = "你是翻译，只返回中文译文，代码和路径不要翻译，保持原样。"
 默认接口地址 = "https://opencode.ai/inference/openai/v1"
@@ -230,40 +227,23 @@ def delete_profile(name):
     return 数据["current"]
 
 
-def _call_api(系统提示, 用户内容):
-    """调一次当前方案的接口，返回模型原文。地址模型缺时临时用默认，缺钥匙抛中文提示。"""
+def _call_api(系统提示, 用户内容, on_chunk=None, cancel=None):
+    """调一次当前方案的接口，返回模型原文。缺钥匙抛 CONFIG 失败。"""
     配置 = load_config()
     密钥 = str(配置.get("api_key", "")).strip()
     接口地址 = _整理接口地址(配置.get("base_url", 默认接口地址))
     模型 = str(配置.get("model", 默认模型)).strip() or 默认模型
     if 密钥 == "":
         raise Failure(CONFIG, "还没有设置密钥，请先打开配置填好密钥再翻译。")
-    网址 = 接口地址 + "/chat/completions"
-    请求头 = {
-        "Authorization": "Bearer " + 密钥,
-        "Content-Type": "application/json",
-    }
-    请求体 = {
-        "model": 模型,
-        "messages": [
-            {"role": "system", "content": 系统提示},
-            {"role": "user", "content": 用户内容},
-        ],
-    }
-    try:
-        回应 = requests.post(网址, headers=请求头, json=请求体, timeout=30)
-    except requests.RequestException:
-        raise Failure(NETWORK, "网络连接失败，请检查网络后重试。", True)
-    if 回应.status_code != 200:
-        raise failure_for_status(回应.status_code)
-    try:
-        数据 = 回应.json()
-        内容 = 数据["choices"][0]["message"]["content"]
-    except (ValueError, KeyError, IndexError, TypeError):
-        raise Failure(PARSE, "翻译结果解析失败，请稍后重试。")
-    if 内容 is None:
-        return ""
-    return str(内容).strip()
+    return _驱动对话(
+        接口地址,
+        密钥,
+        模型,
+        系统提示,
+        用户内容,
+        on_chunk=on_chunk,
+        cancel=cancel,
+    )
 
 
 单词指令 = (
@@ -305,7 +285,7 @@ def lookup_word(word) -> Definition:
     )
 
 
-def translate_en_to_zh(text):
+def translate_en_to_zh(text, on_chunk=None, cancel=None):
     """把英文翻译成中文，只返回中文译文（提示词来自当前方案的 prompt）。"""
     # 空文本直接返回空，不调用接口
     if text is None or str(text).strip() == "":
@@ -313,10 +293,10 @@ def translate_en_to_zh(text):
     原文 = str(text)
     配置 = load_config()
     提示词 = str(配置.get("prompt", "") or "").strip() or 默认提示词
-    return _call_api(提示词, 原文)
+    return _call_api(提示词, 原文, on_chunk=on_chunk, cancel=cancel)
 
 
-def run_intent(意图: Intent):
+def run_intent(意图: Intent, on_chunk=None, cancel=None):
     """唯一入口：按意图分派，成功返回译文/词典，失败返回 Failure，不向界面抛异常。"""
     文本 = str(getattr(意图, "text", "") or "").strip()
     if 文本 == "":
@@ -324,7 +304,7 @@ def run_intent(意图: Intent):
     try:
         if getattr(意图, "kind", "") == WORD:
             return lookup_word(文本)
-        return Translation(translate_en_to_zh(文本))
+        return Translation(translate_en_to_zh(文本, on_chunk=on_chunk, cancel=cancel))
     except Failure as 失败:
         return 失败
     except Exception as 错误:
