@@ -1,0 +1,13 @@
+=== STEP5 BUILD VERIFY 2026-10-24 13:40:35 ===
+build_command=python -m PyInstaller --noconfirm --clean 翻译小助手.spec
+build_exit=0
+artifact=翻译小助手.exe size=37548440 time=2026-10-24 13:39:12
+artifact=翻译小助手-上一版.exe size=37515121 time=2026-10-24 10:07:59
+toc=build\����С����\Analysis-00.toc:  ('translator_domain',
+toc=build\����С����\Analysis-00.toc:   'D:\\10_project\\translator\\translator_domain.py',
+toc=build\����С����\Analysis-00.toc:  ('translator_settings',
+toc=build\����С����\Analysis-00.toc:   'D:\\10_project\\translator\\translator_settings.py',
+toc=build\����С����\Analysis-00.toc:  ('translator_provider',
+toc=build\����С����\Analysis-00.toc:   'D:\\10_project\\translator\\translator_provider.py',
+launch_running=2
+launch_after_kill=0

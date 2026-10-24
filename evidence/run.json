@@ -1,38 +1,18 @@
 {
-  "task": "架构重设计第 4 步（轻量版）：窗口高度按内容自适应",
+  "task": "架构重设计第 5 步：重打单文件 exe",
   "level": "L2",
   "date": "2026-10-24",
-  "base_commit": "05b6ffc",
+  "base_commit": "6ecc40b",
   "changed_files": [
-    {
-      "path": "app.py",
-      "change": "modified",
-      "note": "新增 _算窗口高度 / _fit_window_height；结果出来后按行数调整窗口高度，保留现有布局"
-    },
-    {
-      "path": "tests/test_layout.py",
-      "change": "added",
-      "note": "5 条纯计算测试：短内容、长内容、超长上限、小屏下限、零行"
-    },
     {
       "path": "docs/architecture-redesign.md",
       "change": "modified",
-      "note": "第 4 步记录、状态、验收 11–12、风险表"
+      "note": "第 5 步记录、状态、验收 13、签名风险"
     },
     {
-      "path": "使用说明.txt",
-      "change": "modified",
-      "note": "说明窗口高度会自适应"
-    },
-    {
-      "path": "evidence/test.log",
-      "change": "updated",
-      "note": "第 4 步红/绿/终验"
-    },
-    {
-      "path": "evidence/diff-step4.patch",
+      "path": "evidence/build-step5.log",
       "change": "added",
-      "note": "第 4 步逐行差异"
+      "note": "构建产物、TOC、启动冒烟的机器输出"
     },
     {
       "path": "evidence/run.json",
@@ -45,48 +25,50 @@
       "note": ""
     }
   ],
+  "artifacts_not_versioned": [
+    {
+      "path": "dist/翻译小助手.exe",
+      "size": 37548440,
+      "time": "2026-10-24 13:39:12",
+      "note": "新版，已含第 1–4 步"
+    },
+    {
+      "path": "dist/翻译小助手-上一版.exe",
+      "size": 37515121,
+      "time": "2026-10-24 10:07:59",
+      "note": "上一版备份"
+    }
+  ],
   "commands": [
     {
-      "cmd": "python -m unittest discover -s tests -v",
-      "phase": "RED",
-      "exit": 1,
-      "result": "AttributeError: module 'app' has no attribute '_算窗口高度'"
+      "cmd": "python -m PyInstaller --noconfirm --clean 翻译小助手.spec",
+      "phase": "BUILD",
+      "exit": 0,
+      "result": "Build complete"
     },
     {
-      "cmd": "python -m unittest discover -s tests -v",
-      "phase": "GREEN",
+      "cmd": "findstr translator_domain/translator_provider/translator_settings build\\翻译小助手\\Analysis-00.toc",
+      "phase": "VERIFY",
       "exit": 0,
-      "result": "45 tests OK"
+      "result": "三个模块均在 TOC 中"
     },
     {
-      "cmd": "python -m unittest discover -s tests -v",
-      "phase": "FINAL",
+      "cmd": "Start-Process dist\\翻译小助手.exe; sleep 4; Get-Process; Stop-Process",
+      "phase": "LAUNCH",
       "exit": 0,
-      "result": "45 tests OK"
-    },
-    {
-      "cmd": "python -m py_compile app.py translator_core.py translator_domain.py translator_provider.py translator_settings.py tests/test_domain.py tests/test_provider.py tests/test_settings.py tests/test_layout.py",
-      "phase": "FINAL",
-      "exit": 0,
-      "result": "no syntax errors"
-    },
-    {
-      "cmd": "python -c \"import app; print(app._算窗口高度(...))\"",
-      "phase": "FINAL",
-      "exit": 0,
-      "result": "CORE_OK=True; WIN_H=410; h_short=410; h_long=740"
+      "result": "launch_running=2（单文件父/子进程），launch_after_kill=0"
     }
   ],
   "tests": {
     "total": 45,
     "passed": 45,
     "failed": 0,
-    "network_used_in_tests": false
+    "note": "第 5 步没有改代码，沿用第 4 步结果"
   },
   "not_done": [
-    "完整卡片式界面（无边框、原文折叠、悬停复制）",
-    "短词/长段/长词典的实际观感人工验收",
-    "第 5 步：重打 exe"
+    "在 exe 里人工翻译一次（文档第 8 节第 13 条）",
+    "代码签名",
+    "另一台电脑上试分发"
   ],
-  "verification_gaps": "只验证了高度计算；真实字体下的显示行数与观感需要人工按文档第 8 节第 11、12 条确认"
+  "verification_gaps": "exe 只做了启动冒烟，没有自动在打包程序里跑一次真实翻译；DPAPI 钥匙不跨机器，换电脑需重填"
 }
