@@ -1,0 +1,2 @@
+exstyle= 0x100 toolwindow= False
+minbox= True maxbox= True sysmenu= True

@@ -1,0 +1,2 @@
+before: 其他在前台= False
+after:  目标可见= True 其他仍在前台= False 目标抢到前台= False

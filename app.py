@@ -5,6 +5,7 @@
 [PROTOCOL] 启动隐藏 + Ctrl 轻点(<400ms)触发 + 1200ms 防抖；请求号+取消事件（新的顶掉旧的）；流式首段回来才弹窗；窗口高度按内容自适应；关窗口=藏后台，退出才真正退出；点外面立刻藏起；托盘常驻右下角
 """
 
+import ctypes
 import socket
 import sys
 import threading
@@ -79,6 +80,12 @@ DEBOUNCE_MS = 1200
 TAP_MAX_MS = 400
 SINGLETON_HOST = "127.0.0.1"
 SINGLETON_PORT = 51237
+GA_ROOT = 2
+SW_SHOWNOACTIVATE = 4
+HWND_TOPMOST = -1
+SWP_NOACTIVATE_MOVE_SIZE = 0x13
+VK_LBUTTON = 0x01
+KEY_DOWN = 0x8000
 
 _singleton_sock = None
 
@@ -178,11 +185,6 @@ def _make_tray_image():
 class App:
     def __init__(self):
         self.root = tk.Tk()
-        # 不进任务栏：托盘程序，避免抢焦点时任务栏按钮闪烁
-        try:
-            self.root.attributes("-toolwindow", True)
-        except Exception:
-            pass
         self.root.title("英文翻译小助手")
         self.root.geometry(f"{WIN_W}x{WIN_H}")
         self._window_h = WIN_H
@@ -226,6 +228,9 @@ class App:
         self._request_id = 0
         self._cancel_event = None
         self._popup_on_first_chunk = False
+        self._outside_watch = False
+        self._mouse_was_down = False
+        self._press_outside = False
         self.settings_win = None
         self.tray_icon = None
 
@@ -376,6 +381,7 @@ class App:
         self.status_var.set("复制英文后点一下 Ctrl 就翻译")
 
     def on_hide(self):
+        self._outside_watch = False
         self.root.withdraw()
         self._home_status()
 
@@ -439,25 +445,117 @@ class App:
         except Exception:
             pass
 
+    def _is_foreground(self):
+        try:
+            hwnd = ctypes.windll.user32.GetAncestor(self.root.winfo_id(), GA_ROOT)
+            return ctypes.windll.user32.GetForegroundWindow() == hwnd
+        except Exception:
+            return False
+
+    def _show_no_activate(self):
+        try:
+            hwnd = ctypes.windll.user32.GetAncestor(self.root.winfo_id(), GA_ROOT)
+            ctypes.windll.user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
+        except Exception:
+            self.root.deiconify()
+
+    def _raise_no_activate(self):
+        try:
+            hwnd = ctypes.windll.user32.GetAncestor(self.root.winfo_id(), GA_ROOT)
+            ctypes.windll.user32.SetWindowPos(
+                hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOACTIVATE_MOVE_SIZE
+            )
+        except Exception:
+            pass
+
+    def _pointer_inside(self):
+        try:
+            x, y = self.root.winfo_pointerxy()
+            left = self.root.winfo_rootx()
+            top = self.root.winfo_rooty()
+            return (
+                left <= x < left + self.root.winfo_width()
+                and top <= y < top + self.root.winfo_height()
+            )
+        except Exception:
+            return True
+
+    def _start_outside_watch(self):
+        if self._outside_watch:
+            return
+        self._outside_watch = True
+        try:
+            self._mouse_was_down = bool(
+                ctypes.windll.user32.GetAsyncKeyState(VK_LBUTTON) & KEY_DOWN
+            )
+        except Exception:
+            self._mouse_was_down = False
+        self._press_outside = False
+        try:
+            self.root.after(80, self._watch_outside_click)
+        except Exception:
+            self._outside_watch = False
+
+    def _watch_outside_click(self):
+        if not self._outside_watch:
+            return
+        try:
+            if not self.root.winfo_viewable():
+                self._outside_watch = False
+                return
+            down = bool(
+                ctypes.windll.user32.GetAsyncKeyState(VK_LBUTTON) & KEY_DOWN
+            )
+            if down and not self._mouse_was_down:
+                self._press_outside = not self._pointer_inside()
+            if self._mouse_was_down and not down:
+                if (
+                    self._press_outside
+                    and not self._is_config_open()
+                    and not self._is_foreground()
+                    and not self._pointer_inside()
+                ):
+                    self._outside_watch = False
+                    self.on_hide()
+                    return
+            self._mouse_was_down = down
+        except Exception:
+            self._outside_watch = False
+            return
+        try:
+            self.root.after(80, self._watch_outside_click)
+        except Exception:
+            self._outside_watch = False
+
     def popup(self):
         self._place_top_right()
         try:
             if self.root.winfo_viewable():
-                self.root.lift()
-                try:
-                    self.root.focus_force()
-                except Exception:
-                    pass
+                if self._is_foreground():
+                    self.root.lift()
+                    try:
+                        self.root.focus_force()
+                    except Exception:
+                        pass
+                else:
+                    self._raise_no_activate()
+                self._start_outside_watch()
                 return
         except Exception:
             pass
-        self.root.deiconify()
-        self._place_top_right()
-        try:
-            self.root.lift()
-            self.root.focus_force()
-        except Exception:
-            pass
+        if self._is_foreground():
+            self.root.deiconify()
+            self._place_top_right()
+            try:
+                self.root.lift()
+                self.root.focus_force()
+            except Exception:
+                pass
+        else:
+            self._show_no_activate()
+            self._place_top_right()
+            self._raise_no_activate()
+        self._start_outside_watch()
 
     # ---------- 配置小窗（左列表 + 右详情） ----------
     def open_settings(self):

@@ -1,0 +1,238 @@
+diff --git a/app.py b/app.py
+index 69c95c9..0c86ea6 100644
+--- a/app.py
++++ b/app.py
+@@ -5,6 +5,7 @@
+ [PROTOCOL] 启动隐藏 + Ctrl 轻点(<400ms)触发 + 1200ms 防抖；请求号+取消事件（新的顶掉旧的）；流式首段回来才弹窗；窗口高度按内容自适应；关窗口=藏后台，退出才真正退出；点外面立刻藏起；托盘常驻右下角
+ """
+ 
++import ctypes
+ import socket
+ import sys
+ import threading
+@@ -79,6 +80,12 @@ DEBOUNCE_MS = 1200
+ TAP_MAX_MS = 400
+ SINGLETON_HOST = "127.0.0.1"
+ SINGLETON_PORT = 51237
++GA_ROOT = 2
++SW_SHOWNOACTIVATE = 4
++HWND_TOPMOST = -1
++SWP_NOACTIVATE_MOVE_SIZE = 0x13
++VK_LBUTTON = 0x01
++KEY_DOWN = 0x8000
+ 
+ _singleton_sock = None
+ 
+@@ -178,11 +185,6 @@ def _make_tray_image():
+ class App:
+     def __init__(self):
+         self.root = tk.Tk()
+-        # 不进任务栏：托盘程序，避免抢焦点时任务栏按钮闪烁
+-        try:
+-            self.root.attributes("-toolwindow", True)
+-        except Exception:
+-            pass
+         self.root.title("英文翻译小助手")
+         self.root.geometry(f"{WIN_W}x{WIN_H}")
+         self._window_h = WIN_H
+@@ -226,6 +228,9 @@ class App:
+         self._request_id = 0
+         self._cancel_event = None
+         self._popup_on_first_chunk = False
++        self._outside_watch = False
++        self._mouse_was_down = False
++        self._press_outside = False
+         self.settings_win = None
+         self.tray_icon = None
+ 
+@@ -376,6 +381,7 @@ class App:
+         self.status_var.set("复制英文后点一下 Ctrl 就翻译")
+ 
+     def on_hide(self):
++        self._outside_watch = False
+         self.root.withdraw()
+         self._home_status()
+ 
+@@ -439,25 +445,117 @@ class App:
+         except Exception:
+             pass
+ 
+-    def popup(self):
+-        self._place_top_right()
++    def _is_foreground(self):
+         try:
+-            if self.root.winfo_viewable():
+-                self.root.lift()
+-                try:
+-                    self.root.focus_force()
+-                except Exception:
+-                    pass
+-                return
++            hwnd = ctypes.windll.user32.GetAncestor(self.root.winfo_id(), GA_ROOT)
++            return ctypes.windll.user32.GetForegroundWindow() == hwnd
++        except Exception:
++            return False
++
++    def _show_no_activate(self):
++        try:
++            hwnd = ctypes.windll.user32.GetAncestor(self.root.winfo_id(), GA_ROOT)
++            ctypes.windll.user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
++        except Exception:
++            self.root.deiconify()
++
++    def _raise_no_activate(self):
++        try:
++            hwnd = ctypes.windll.user32.GetAncestor(self.root.winfo_id(), GA_ROOT)
++            ctypes.windll.user32.SetWindowPos(
++                hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOACTIVATE_MOVE_SIZE
++            )
+         except Exception:
+             pass
+-        self.root.deiconify()
++
++    def _pointer_inside(self):
++        try:
++            x, y = self.root.winfo_pointerxy()
++            left = self.root.winfo_rootx()
++            top = self.root.winfo_rooty()
++            return (
++                left <= x < left + self.root.winfo_width()
++                and top <= y < top + self.root.winfo_height()
++            )
++        except Exception:
++            return True
++
++    def _start_outside_watch(self):
++        if self._outside_watch:
++            return
++        self._outside_watch = True
++        try:
++            self._mouse_was_down = bool(
++                ctypes.windll.user32.GetAsyncKeyState(VK_LBUTTON) & KEY_DOWN
++            )
++        except Exception:
++            self._mouse_was_down = False
++        self._press_outside = False
++        try:
++            self.root.after(80, self._watch_outside_click)
++        except Exception:
++            self._outside_watch = False
++
++    def _watch_outside_click(self):
++        if not self._outside_watch:
++            return
++        try:
++            if not self.root.winfo_viewable():
++                self._outside_watch = False
++                return
++            down = bool(
++                ctypes.windll.user32.GetAsyncKeyState(VK_LBUTTON) & KEY_DOWN
++            )
++            if down and not self._mouse_was_down:
++                self._press_outside = not self._pointer_inside()
++            if self._mouse_was_down and not down:
++                if (
++                    self._press_outside
++                    and not self._is_config_open()
++                    and not self._is_foreground()
++                    and not self._pointer_inside()
++                ):
++                    self._outside_watch = False
++                    self.on_hide()
++                    return
++            self._mouse_was_down = down
++        except Exception:
++            self._outside_watch = False
++            return
++        try:
++            self.root.after(80, self._watch_outside_click)
++        except Exception:
++            self._outside_watch = False
++
++    def popup(self):
+         self._place_top_right()
+         try:
+-            self.root.lift()
+-            self.root.focus_force()
++            if self.root.winfo_viewable():
++                if self._is_foreground():
++                    self.root.lift()
++                    try:
++                        self.root.focus_force()
++                    except Exception:
++                        pass
++                else:
++                    self._raise_no_activate()
++                self._start_outside_watch()
++                return
+         except Exception:
+             pass
++        if self._is_foreground():
++            self.root.deiconify()
++            self._place_top_right()
++            try:
++                self.root.lift()
++                self.root.focus_force()
++            except Exception:
++                pass
++        else:
++            self._show_no_activate()
++            self._place_top_right()
++            self._raise_no_activate()
++        self._start_outside_watch()
+ 
+     # ---------- 配置小窗（左列表 + 右详情） ----------
+     def open_settings(self):
+diff --git a/docs/architecture-redesign.md b/docs/architecture-redesign.md
+index ed8702d..490b200 100644
+--- a/docs/architecture-redesign.md
++++ b/docs/architecture-redesign.md
+@@ -138,7 +138,7 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ - **D8 用请求号代替单队列**：行为等价（只有最后一次可见），实现更小；不做线程池/队列。
+ - **D9 配置放用户目录**：`%LOCALAPPDATA%\翻译小助手\config.json`，不再跟 exe/脚本走；解决打包后临时目录丢配置。
+ - **D10 用 DPAPI 而不是凭据管理器**：不加新依赖、天然支持多方案；代价是换机器/换用户解不开，需要重填钥匙。
+-- **D11 主窗口不进任务栏**：`-toolwindow`，避免后台抢焦点时任务栏按钮闪烁；入口统一走托盘图标。
++- **D11 不抢前台焦点**：后台显示用 `SW_SHOWNOACTIVATE`；只有已在前台才 `focus_force`；点外面用鼠标轮询兜底，避免任务栏/关闭按钮闪烁。
+ 
+ ---
+ 
+@@ -206,7 +206,8 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ 13. 双击 `dist\翻译小助手.exe` → 配置里方案还在 → 翻译一次 → □ 正常出结果。
+ 14. 复制一段多行英文 → 轻点 Ctrl → □ 原文下面只留一条窄缝（约 18 像素），不是一大片空白。
+ 15. 翻译一段英文 → □ 译文是正常中文，不是 `å®...` 这种乱码。
+-16. 翻译时看任务栏 → □ 不再出现本程序的任务栏按钮/闪烁；右下角托盘图标还在。
++16. 翻译时看任务栏和标题栏 → □ 任务栏按钮、关闭按钮都不闪；关闭按钮只把窗口藏起来，退出仍用托盘。
++17. 点窗口外面的任意地方 → □ 窗口立刻藏起（窗口没有焦点时也一样）。
+ 
+ ---
+ 
+@@ -309,21 +310,23 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ - 代码签名（SmartScreen 可能提示）。
+ - 在另一台电脑上试分发（DPAPI 钥匙不跨机器，需重填）。
+ 
+-## 14. 验收反馈：任务栏闪烁（2026-10-24）
++## 14. 验收反馈：任务栏/关闭按钮闪烁（2026-10-24）
+ 
+ ### 原因
+ 
+ - 每次弹窗调用 `focus_force`；Windows 前台锁允许时正常，拒绝时闪任务栏按钮。
+-- 程序是托盘常驻，任务栏按钮本身多余。
++- 第一版把主窗口设成工具窗口，任务栏按钮没了，但闪烁转移到标题栏关闭按钮（用户反馈灰方块会闪）。
+ 
+ ### 修法
+ 
+-- 主窗口设 `-toolwindow`：不进任务栏/Alt+Tab；托盘图标照旧。
+-- 使用说明的兜底从“任务栏找窗口”改为“托盘图标 → 显示窗口”。
++- 恢复普通窗口：正常标题栏、标准关闭按钮、任务栏按钮。
++- 后台显示用 `SW_SHOWNOACTIVATE`，不抢焦点；只有已在前台才 `focus_force`。
++- 点窗口外面藏起改为鼠标轮询兜底：按下在窗外，松开时仍不在前台且不在窗内才藏。
++- 关闭按钮只隐藏窗口，退出仍走托盘。
+ 
+ ### 验证
+ 
+-- `GetWindowLong(GWL_EXSTYLE)` 含 `WS_EX_TOOLWINDOW`（0x80）。
+-- 48 条单测全过；exe 重打（14:19）。
++- `SW_SHOWNOACTIVATE` 实测：窗口可见，但没有抢到前台。
++- 48 条单测全过；exe 重打。
+ - 实际不闪需用户重启后看。
+ 

@@ -1,43 +1,43 @@
 {
-  "task": "验收反馈：任务栏闪烁",
+  "task": "验收反馈 2：任务栏/关闭按钮闪烁，恢复普通窗口 + 不抢焦点",
   "level": "L2",
   "date": "2026-10-24",
-  "base_commit": "a81d389",
+  "base_commit": "aab62e7",
   "changed_files": [
     {
       "path": "app.py",
       "change": "modified",
-      "note": "主窗口设 -toolwindow，不进任务栏/Alt+Tab，避免抢焦点时任务栏按钮闪烁"
-    },
-    {
-      "path": "使用说明.txt",
-      "change": "modified",
-      "note": "兜底从“任务栏找窗口”改为“托盘图标 → 显示窗口”"
+      "note": "撤掉 -toolwindow，恢复普通标题栏/任务栏；后台显示用 SW_SHOWNOACTIVATE，不抢焦点；点外面用鼠标轮询兜底"
     },
     {
       "path": "docs/architecture-redesign.md",
       "change": "modified",
-      "note": "D11、第 14 节、验收 16"
+      "note": "D11 改为不抢前台焦点；第 14 节记录工具窗口方案失败与最终修法；验收 16/17"
     },
     {
-      "path": "evidence/taskbar-check.log",
+      "path": "evidence/window-style-check.log",
       "change": "added",
-      "note": "扩展样式含 WS_EX_TOOLWINDOW（0x80）"
+      "note": "扩展样式 toolwindow=False，标准标题栏/关闭按钮"
     },
     {
-      "path": "evidence/build-taskbar.log",
+      "path": "evidence/noactivate-check.log",
+      "change": "added",
+      "note": "SW_SHOWNOACTIVATE 后窗口可见但没有抢到前台"
+    },
+    {
+      "path": "evidence/build-taskbar2.log",
       "change": "added",
       "note": "重打 exe 的产物信息"
     },
     {
-      "path": "evidence/diff-taskbar.patch",
+      "path": "evidence/diff-taskbar2.patch",
       "change": "added",
       "note": "本次逐行差异"
     },
     {
       "path": "evidence/test.log",
       "change": "updated",
-      "note": "任务栏修正终验"
+      "note": "任务栏修正 2 终验"
     },
     {
       "path": "evidence/run.json",
@@ -52,10 +52,16 @@
   ],
   "commands": [
     {
-      "cmd": "python -c \"... Tk -toolwindow + GetWindowLong(GWL_EXSTYLE) ...\"",
+      "cmd": "python -c \"... GetWindowLong(GWL_EXSTYLE) ...\"",
       "phase": "STYLE",
       "exit": 0,
-      "result": "exstyle=0x180, toolwindow=True, minbox=True, maxbox=True"
+      "result": "exstyle=0x100, toolwindow=False, minbox=True, maxbox=True, sysmenu=True"
+    },
+    {
+      "cmd": "python -c \"... 目标窗口 + SW_SHOWNOACTIVATE ...\"",
+      "phase": "NOACTIVATE",
+      "exit": 0,
+      "result": "目标可见=True，目标抢到前台=False"
     },
     {
       "cmd": "python -m unittest discover -s tests -v",
@@ -73,7 +79,7 @@
       "cmd": "python -m PyInstaller --noconfirm --clean 翻译小助手.spec",
       "phase": "BUILD",
       "exit": 0,
-      "result": "Build complete; exe=37,545,948 bytes @ 2026-10-24 14:19:48"
+      "result": "Build complete; exe=37,549,779 bytes @ 2026-10-24 14:30:49"
     }
   ],
   "tests": {
@@ -85,21 +91,21 @@
   "artifacts_not_versioned": [
     {
       "path": "dist/翻译小助手.exe",
-      "size": 37545948,
-      "time": "2026-10-24 14:19:48",
-      "note": "含 -toolwindow"
+      "size": 37549779,
+      "time": "2026-10-24 14:30:49",
+      "note": "普通窗口 + 不抢焦点 + 鼠标轮询兜底"
     },
     {
       "path": "dist/翻译小助手-上一版.exe",
-      "size": 37548724,
-      "time": "2026-10-24 14:11:13",
-      "note": "上一版备份"
+      "size": 37545948,
+      "time": "2026-10-24 14:19:48",
+      "note": "上一版备份（工具窗口方案）"
     }
   ],
   "not_done": [
-    "用户重启后按验收 16 人工看任务栏",
+    "用户重启后按验收 16/17 人工看任务栏与关闭按钮",
     "exe 启动冒烟跳过（源程序正在运行，占用单实例端口）",
     "旧明文 config.json 与 config.my.json 仍待确认删除"
   ],
-  "verification_gaps": "WS_EX_TOOLWINDOW 已用扩展样式确认；实际“不闪”需要用户重启后看。主窗口不再有任务栏按钮，入口改为托盘图标。"
+  "verification_gaps": "已确认普通窗口样式与 SW_SHOWNOACTIVATE 不抢前台；实际“不闪”和“点外面藏起”需要用户重启后看。工具窗口方案已回退。"
 }
