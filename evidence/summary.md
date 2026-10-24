@@ -1,10 +1,10 @@
 # 收工证据（三行）
 
-1. 做了什么：原文区改成按实际像素算，文字下面正好留 18 像素；顶栏压成一行并把方案名放进窗口标题；流式返回按 UTF-8 原始字节解码，修掉中文乱码。
-2. 验了什么：48 条离线单测先红后绿（新增中文流式 1 条、原文高度 2 条）；真实 Tk 布局实测文本 190px、面板 231px、空隙 18px；真实接口返回有中文、无乱码；重打 exe 成功。
-3. 还剩什么：你重启程序后看第 14、15 条；旧明文 `config.json` / `config.my.json` 还等你确认删除。
+1. 做了什么：上次公式改对了但没生效——窗口刚显示时宽度还是 1，文本按 1 像素换行，行数被算多；这次先让窗口完成布局（`update`）再量，再定高度和分栏。
+2. 验了什么：复现到 `update_idletasks` 后宽 1、文本 19px；改成 `_refit` 后按真实显示时序实测 window 446、原文面板 212、文本 171、空隙 18px；48 条单测全过；乱码修正保持正常；exe 已重打。
+3. 还剩什么：你重启后看第 14、15 条；旧明文 `config.json` / `config.my.json` 还等你确认删除。
 
-## 验收单（只验这次新增的）
+## 验收单（只验这次）
 
 14. 复制一段多行英文 → 轻点 Ctrl → □ 原文下面只留一条窄缝（约 18 像素），不是一大片空白。
 15. 翻译一段英文 → □ 译文是正常中文，不是 `å®...` 这种乱码。
@@ -13,12 +13,12 @@
 
 ## 怎么看到新效果
 
-现在的程序是后台运行的旧代码。右下角图标点“退出”，再双击 `run_hidden.vbs`（或 `run.bat`）重新打开。
+后台程序还是旧代码：右下角“译”图标 → 右键 → 退出，再双击 `run_hidden.vbs`（或 `run.bat`）。
+exe 也重打好了（14:11 那版），上一版在 `dist\翻译小助手-上一版.exe`。
 
 ## 证据在哪
 
-- `evidence/layout-check.log`：真实 Tk 布局实测，空隙 18px
-- `evidence/live-smoke-ui-fix.log`：真实接口中文检查
-- `evidence/build-ui-fix.log`：重打 exe 的构建与打包清单
-- `evidence/diff-ui-fix.patch`：本次逐行差异
-- `dist\翻译小助手.exe`：新 exe；上一版在 `dist\翻译小助手-上一版.exe`
+- `evidence/layout-repro2.log`：复现“宽度 1”的原始数据
+- `evidence/layout-check-fixed.log`：真实 Tk + App 方法，空隙 18px
+- `evidence/build-ui-fix2.log`：重打 exe 的产物信息
+- `evidence/diff-ui-fix2.patch`：本次逐行差异

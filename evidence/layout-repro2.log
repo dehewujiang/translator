@@ -1,0 +1,3 @@
+after_idletasks: w= 1 paned_h= 1 text_px= 19
+after_update:   w= 360 paned_h= 600 text_px= 171
+sash: desired= 212 pane_h= 212 text_h= 189 gap= 18

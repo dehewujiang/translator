@@ -1,0 +1,3 @@
+after_idletasks: text_w= 1 text_px= 19 paned_h= 1 desired= 60
+after_sash: pane_h= 1 text_h= 1 gap= -18
+after_update: text_w= 1 text_px= 19

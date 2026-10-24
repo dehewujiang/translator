@@ -1,58 +1,43 @@
 {
-  "task": "验收反馈修正：原文区间距 + 流式中文编码",
+  "task": "验收反馈修正 2：窗口显示时序导致原文区空白",
   "level": "L2",
   "date": "2026-10-24",
-  "base_commit": "197e15f",
+  "base_commit": "9ed358d",
   "changed_files": [
     {
       "path": "app.py",
       "change": "modified",
-      "note": "顶栏压成一行、方案名进标题；原文区改按 ypixels + 18px，去掉行数估算和 22% 下限"
-    },
-    {
-      "path": "translator_provider.py",
-      "change": "modified",
-      "note": "流式 iter_lines 改 decode_unicode=False，按原始字节 UTF-8 解码，修中文乱码"
-    },
-    {
-      "path": "tests/test_provider.py",
-      "change": "modified",
-      "note": "假回应模拟 requests 默认西文解码；新增 UTF-8 中文流式测试"
-    },
-    {
-      "path": "tests/test_layout.py",
-      "change": "modified",
-      "note": "新增 _算原文高度 两条：文本 + 18px、空文本至少一行"
+      "note": "新增 _refit：先 update 完成窗口映射，再量文本、定高、分栏；_show_text/_show_dict 改走 _refit"
     },
     {
       "path": "docs/architecture-redesign.md",
       "change": "modified",
-      "note": "第 2/4 步记录补编码与间距修正；验收 14/15"
+      "note": "第 4 步记录补时序问题与真实时序验证"
+    },
+    {
+      "path": "evidence/layout-repro2.log",
+      "change": "added",
+      "note": "复现：update_idletasks 后宽 1、paned 高 1；update 后宽 360、文本 171"
+    },
+    {
+      "path": "evidence/layout-check-fixed.log",
+      "change": "added",
+      "note": "真实 Tk + App 方法：window 446、pane 212、text 171、gap 18"
+    },
+    {
+      "path": "evidence/build-ui-fix2.log",
+      "change": "added",
+      "note": "重打 exe 的产物信息"
+    },
+    {
+      "path": "evidence/diff-ui-fix2.patch",
+      "change": "added",
+      "note": "本次修正逐行差异"
     },
     {
       "path": "evidence/test.log",
       "change": "updated",
-      "note": "UI-FIX 红/绿/终验"
-    },
-    {
-      "path": "evidence/layout-check.log",
-      "change": "added",
-      "note": "真实 Tk 布局实测：文本 190px、面板 231px、空隙 18px"
-    },
-    {
-      "path": "evidence/live-smoke-ui-fix.log",
-      "change": "added",
-      "note": "真实流式请求：有中文、无乱码"
-    },
-    {
-      "path": "evidence/build-ui-fix.log",
-      "change": "added",
-      "note": "重打 exe 的构建与 TOC 输出"
-    },
-    {
-      "path": "evidence/diff-ui-fix.patch",
-      "change": "added",
-      "note": "本次修正逐行差异"
+      "note": "UI-FIX2 终验"
     },
     {
       "path": "evidence/run.json",
@@ -67,16 +52,16 @@
   ],
   "commands": [
     {
-      "cmd": "python -m unittest discover -s tests -v",
-      "phase": "RED",
-      "exit": 1,
-      "result": "48 tests, failures=1 errors=2（UTF-8 乱码测试 + _算原文高度缺失）"
+      "cmd": "python -c \"... withdraw/deiconify + update_idletasks vs update ...\"",
+      "phase": "REPRO",
+      "exit": 0,
+      "result": "after_idletasks: w=1, paned_h=1, text_px=19; after_update: w=360, paned_h=600, text_px=171"
     },
     {
-      "cmd": "python -m unittest discover -s tests -v",
-      "phase": "GREEN",
+      "cmd": "python -c \"... 真实 Tk 窗口 + App._refit ...\"",
+      "phase": "FIXED",
       "exit": 0,
-      "result": "48 tests OK"
+      "result": "window_h=446, pane_h=212, text_h=189, text_px=171, gap=18"
     },
     {
       "cmd": "python -m unittest discover -s tests -v",
@@ -91,49 +76,36 @@
       "result": "no syntax errors"
     },
     {
-      "cmd": "python -c \"... run_intent(Intent('text', ...), on_chunk=...) ...\"",
-      "phase": "LIVE",
-      "exit": 0,
-      "result": "result_type=Translation, chunks=6, chars=8, has_cjk=True, mojibake=False"
-    },
-    {
-      "cmd": "python -c \"... Tk PanedWindow 布局实测 ...\"",
-      "phase": "LAYOUT",
-      "exit": 0,
-      "result": "text_px=190, desired_pane=231, actual_pane=231, text_widget_h=208, gap_px=18"
-    },
-    {
       "cmd": "python -m PyInstaller --noconfirm --clean 翻译小助手.spec",
       "phase": "BUILD",
       "exit": 0,
-      "result": "Build complete; exe=37,549,357 bytes @ 2026-10-24 14:03:31"
+      "result": "Build complete; exe=37,548,724 bytes @ 2026-10-24 14:11:13"
     }
   ],
   "tests": {
     "total": 48,
     "passed": 48,
     "failed": 0,
-    "network_used_in_tests": false,
-    "live_smoke": true
+    "network_used_in_tests": false
   },
   "artifacts_not_versioned": [
     {
       "path": "dist/翻译小助手.exe",
-      "size": 37549357,
-      "time": "2026-10-24 14:03:31",
-      "note": "含本次两处修正"
+      "size": 37548724,
+      "time": "2026-10-24 14:11:13",
+      "note": "含 _refit 真实时序修复"
     },
     {
       "path": "dist/翻译小助手-上一版.exe",
-      "size": 37548440,
-      "time": "2026-10-24 13:39:12",
-      "note": "上一版备份"
+      "size": 37549357,
+      "time": "2026-10-24 14:03:31",
+      "note": "上一版备份（公式修法，未处理时序）"
     }
   ],
   "not_done": [
+    "用户重启后按验收 14/15 人工看",
     "exe 启动冒烟跳过（源程序正在运行，占用单实例端口）",
-    "用户重启源程序后按验收 14/15 人工看",
     "旧明文 config.json 与 config.my.json 仍待确认删除"
   ],
-  "verification_gaps": "18px 已用真实 Tk 布局实测；观感仍需用户确认。exe 只验证构建与 TOC，未在新 exe 里自动翻译。"
+  "verification_gaps": "18px 已用真实 Tk 窗口 + App._refit 集成实测；仍有窗口闪烁/观感需要用户确认。上一版提交 9ed358d 只改了公式，未处理窗口刚显示时宽度为 1 的时序，本提交补上。"
 }

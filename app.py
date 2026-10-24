@@ -406,6 +406,19 @@ class App:
         except Exception:
             pass
 
+    def _refit(self):
+        # 窗口刚显示时 update_idletasks 拿不到真实宽高，必须先跑一次 update
+        try:
+            self.root.update()
+        except Exception:
+            pass
+        self._fit_window_height()
+        try:
+            self.root.update()
+        except Exception:
+            pass
+        self._auto_split()
+
     def _fit_window_height(self):
         try:
             self.root.update_idletasks()
@@ -867,8 +880,7 @@ class App:
             self.dst_text.delete("1.0", "end")
             self.dst_text.insert("1.0", str(结果))
         self.popup()
-        self._fit_window_height()
-        self._auto_split()
+        self._refit()
 
     def _pane_lines(self, widget):
         try:
@@ -911,8 +923,7 @@ class App:
         self.dst_text.insert("1.0", 文本 or "没有拿到翻译结果")
         # 先弹出来再分：藏着时量不到高，自动分会被跳过
         self.popup()
-        self._fit_window_height()
-        self._auto_split()
+        self._refit()
 
     def _show_failure(self, 失败):
         原文兜底 = str(失败.raw or "").strip()
