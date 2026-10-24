@@ -178,6 +178,11 @@ def _make_tray_image():
 class App:
     def __init__(self):
         self.root = tk.Tk()
+        # 不进任务栏：托盘程序，避免抢焦点时任务栏按钮闪烁
+        try:
+            self.root.attributes("-toolwindow", True)
+        except Exception:
+            pass
         self.root.title("英文翻译小助手")
         self.root.geometry(f"{WIN_W}x{WIN_H}")
         self._window_h = WIN_H

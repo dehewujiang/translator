@@ -1,0 +1,71 @@
+diff --git a/app.py b/app.py
+index 845a063..69c95c9 100644
+--- a/app.py
++++ b/app.py
+@@ -178,6 +178,11 @@ def _make_tray_image():
+ class App:
+     def __init__(self):
+         self.root = tk.Tk()
++        # 不进任务栏：托盘程序，避免抢焦点时任务栏按钮闪烁
++        try:
++            self.root.attributes("-toolwindow", True)
++        except Exception:
++            pass
+         self.root.title("英文翻译小助手")
+         self.root.geometry(f"{WIN_W}x{WIN_H}")
+         self._window_h = WIN_H
+diff --git a/docs/architecture-redesign.md b/docs/architecture-redesign.md
+index 327f579..ed8702d 100644
+--- a/docs/architecture-redesign.md
++++ b/docs/architecture-redesign.md
+@@ -138,6 +138,7 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ - **D8 用请求号代替单队列**：行为等价（只有最后一次可见），实现更小；不做线程池/队列。
+ - **D9 配置放用户目录**：`%LOCALAPPDATA%\翻译小助手\config.json`，不再跟 exe/脚本走；解决打包后临时目录丢配置。
+ - **D10 用 DPAPI 而不是凭据管理器**：不加新依赖、天然支持多方案；代价是换机器/换用户解不开，需要重填钥匙。
++- **D11 主窗口不进任务栏**：`-toolwindow`，避免后台抢焦点时任务栏按钮闪烁；入口统一走托盘图标。
+ 
+ ---
+ 
+@@ -205,6 +206,7 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ 13. 双击 `dist\翻译小助手.exe` → 配置里方案还在 → 翻译一次 → □ 正常出结果。
+ 14. 复制一段多行英文 → 轻点 Ctrl → □ 原文下面只留一条窄缝（约 18 像素），不是一大片空白。
+ 15. 翻译一段英文 → □ 译文是正常中文，不是 `å®...` 这种乱码。
++16. 翻译时看任务栏 → □ 不再出现本程序的任务栏按钮/闪烁；右下角托盘图标还在。
+ 
+ ---
+ 
+@@ -307,3 +309,21 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ - 代码签名（SmartScreen 可能提示）。
+ - 在另一台电脑上试分发（DPAPI 钥匙不跨机器，需重填）。
+ 
++## 14. 验收反馈：任务栏闪烁（2026-10-24）
++
++### 原因
++
++- 每次弹窗调用 `focus_force`；Windows 前台锁允许时正常，拒绝时闪任务栏按钮。
++- 程序是托盘常驻，任务栏按钮本身多余。
++
++### 修法
++
++- 主窗口设 `-toolwindow`：不进任务栏/Alt+Tab；托盘图标照旧。
++- 使用说明的兜底从“任务栏找窗口”改为“托盘图标 → 显示窗口”。
++
++### 验证
++
++- `GetWindowLong(GWL_EXSTYLE)` 含 `WS_EX_TOOLWINDOW`（0x80）。
++- 48 条单测全过；exe 重打（14:19）。
++- 实际不闪需用户重启后看。
++
+diff --git "a/\344\275\277\347\224\250\350\257\264\346\230\216.txt" "b/\344\275\277\347\224\250\350\257\264\346\230\216.txt"
+index 09053ea..0191979 100644
+--- "a/\344\275\277\347\224\250\350\257\264\346\230\216.txt"
++++ "b/\344\275\277\347\224\250\350\257\264\346\230\216.txt"
+@@ -15,7 +15,7 @@
+ 第二步：轻轻点一下键盘左边的 Ctrl 键（点一下就松开，不要一直按）。
+ 第三步：翻译好的中文窗口会自动弹出来。
+ 长段落会边翻译边显示，先出来的字先看到，不用等整段完成。
+-如果点 Ctrl 没反应，就在下面任务栏找到小窗口，点开后按“翻译剪贴板”按钮也一样。
++如果点 Ctrl 没反应，就去右下角点蓝色“译”图标，选“显示窗口”，再按“翻译剪贴板”按钮也一样。
+ 只想叫出窗口不翻译：按 Alt+Q，出来的是上次的内容。
+ 
+ 窗口不用关，点外面就自动藏起：

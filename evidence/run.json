@@ -1,43 +1,43 @@
 {
-  "task": "验收反馈修正 2：窗口显示时序导致原文区空白",
+  "task": "验收反馈：任务栏闪烁",
   "level": "L2",
   "date": "2026-10-24",
-  "base_commit": "9ed358d",
+  "base_commit": "a81d389",
   "changed_files": [
     {
       "path": "app.py",
       "change": "modified",
-      "note": "新增 _refit：先 update 完成窗口映射，再量文本、定高、分栏；_show_text/_show_dict 改走 _refit"
+      "note": "主窗口设 -toolwindow，不进任务栏/Alt+Tab，避免抢焦点时任务栏按钮闪烁"
+    },
+    {
+      "path": "使用说明.txt",
+      "change": "modified",
+      "note": "兜底从“任务栏找窗口”改为“托盘图标 → 显示窗口”"
     },
     {
       "path": "docs/architecture-redesign.md",
       "change": "modified",
-      "note": "第 4 步记录补时序问题与真实时序验证"
+      "note": "D11、第 14 节、验收 16"
     },
     {
-      "path": "evidence/layout-repro2.log",
+      "path": "evidence/taskbar-check.log",
       "change": "added",
-      "note": "复现：update_idletasks 后宽 1、paned 高 1；update 后宽 360、文本 171"
+      "note": "扩展样式含 WS_EX_TOOLWINDOW（0x80）"
     },
     {
-      "path": "evidence/layout-check-fixed.log",
-      "change": "added",
-      "note": "真实 Tk + App 方法：window 446、pane 212、text 171、gap 18"
-    },
-    {
-      "path": "evidence/build-ui-fix2.log",
+      "path": "evidence/build-taskbar.log",
       "change": "added",
       "note": "重打 exe 的产物信息"
     },
     {
-      "path": "evidence/diff-ui-fix2.patch",
+      "path": "evidence/diff-taskbar.patch",
       "change": "added",
-      "note": "本次修正逐行差异"
+      "note": "本次逐行差异"
     },
     {
       "path": "evidence/test.log",
       "change": "updated",
-      "note": "UI-FIX2 终验"
+      "note": "任务栏修正终验"
     },
     {
       "path": "evidence/run.json",
@@ -52,16 +52,10 @@
   ],
   "commands": [
     {
-      "cmd": "python -c \"... withdraw/deiconify + update_idletasks vs update ...\"",
-      "phase": "REPRO",
+      "cmd": "python -c \"... Tk -toolwindow + GetWindowLong(GWL_EXSTYLE) ...\"",
+      "phase": "STYLE",
       "exit": 0,
-      "result": "after_idletasks: w=1, paned_h=1, text_px=19; after_update: w=360, paned_h=600, text_px=171"
-    },
-    {
-      "cmd": "python -c \"... 真实 Tk 窗口 + App._refit ...\"",
-      "phase": "FIXED",
-      "exit": 0,
-      "result": "window_h=446, pane_h=212, text_h=189, text_px=171, gap=18"
+      "result": "exstyle=0x180, toolwindow=True, minbox=True, maxbox=True"
     },
     {
       "cmd": "python -m unittest discover -s tests -v",
@@ -79,7 +73,7 @@
       "cmd": "python -m PyInstaller --noconfirm --clean 翻译小助手.spec",
       "phase": "BUILD",
       "exit": 0,
-      "result": "Build complete; exe=37,548,724 bytes @ 2026-10-24 14:11:13"
+      "result": "Build complete; exe=37,545,948 bytes @ 2026-10-24 14:19:48"
     }
   ],
   "tests": {
@@ -91,21 +85,21 @@
   "artifacts_not_versioned": [
     {
       "path": "dist/翻译小助手.exe",
-      "size": 37548724,
-      "time": "2026-10-24 14:11:13",
-      "note": "含 _refit 真实时序修复"
+      "size": 37545948,
+      "time": "2026-10-24 14:19:48",
+      "note": "含 -toolwindow"
     },
     {
       "path": "dist/翻译小助手-上一版.exe",
-      "size": 37549357,
-      "time": "2026-10-24 14:03:31",
-      "note": "上一版备份（公式修法，未处理时序）"
+      "size": 37548724,
+      "time": "2026-10-24 14:11:13",
+      "note": "上一版备份"
     }
   ],
   "not_done": [
-    "用户重启后按验收 14/15 人工看",
+    "用户重启后按验收 16 人工看任务栏",
     "exe 启动冒烟跳过（源程序正在运行，占用单实例端口）",
     "旧明文 config.json 与 config.my.json 仍待确认删除"
   ],
-  "verification_gaps": "18px 已用真实 Tk 窗口 + App._refit 集成实测；仍有窗口闪烁/观感需要用户确认。上一版提交 9ed358d 只改了公式，未处理窗口刚显示时宽度为 1 的时序，本提交补上。"
+  "verification_gaps": "WS_EX_TOOLWINDOW 已用扩展样式确认；实际“不闪”需要用户重启后看。主窗口不再有任务栏按钮，入口改为托盘图标。"
 }

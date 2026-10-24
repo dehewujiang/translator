@@ -1,0 +1,6 @@
+=== TASKBAR FIX BUILD 2026-10-24 14:20:13 ===
+build_command=python -m PyInstaller --noconfirm --clean 翻译小助手.spec
+build_exit=0
+artifact=翻译小助手.exe size=37545948 time=2026-10-24 14:19:48
+artifact=翻译小助手-上一版.exe size=37548724 time=2026-10-24 14:11:13
+launch=skipped (source app running, singleton port busy)
