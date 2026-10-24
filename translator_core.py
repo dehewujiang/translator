@@ -1,12 +1,11 @@
 """翻译核心：英文到中文的后端单元。
-[INPUT] 英文文本 + config.json 当前方案（api_key / base_url / model / prompt）。
+[INPUT] 英文文本 + 当前方案（由 translator_settings 读取）。
 [OUTPUT] 译文 / 词典 / 类型化 Failure；界面只经 run_intent 进入。
-[POS] 能力层：被 app.py 使用；向上不认识界面，向下依赖 translator_domain 与 translator_provider。
-[PROTOCOL] 通过 translator_provider 调 OpenAI 兼容接口；老版单层 config.json 自动迁移。
+[POS] 能力层：被 app.py 使用；向上不认识界面，向下依赖 domain/provider/settings。
+[PROTOCOL] 通过 translator_provider 调 OpenAI 兼容接口；配置迁移与加密在 translator_settings。
 """
 
 import json
-import os
 
 from translator_domain import (
     CONFIG,
@@ -21,13 +20,7 @@ from translator_domain import (
     is_single_word,
 )
 from translator_provider import chat as _驱动对话
-
-默认提示词 = "你是翻译，只返回中文译文，代码和路径不要翻译，保持原样。"
-默认接口地址 = "https://opencode.ai/inference/openai/v1"
-默认模型 = "deepseek-v4.1-flash"
-
-# 配置文件放在本文件同一目录
-配置文件路径 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+from translator_settings import 默认接口地址, 默认模型, 默认提示词, load_config
 
 
 def _整理接口地址(地址):
@@ -35,196 +28,6 @@ def _整理接口地址(地址):
     if not 地址:
         return 默认接口地址
     return str(地址).strip().rstrip("/") or 默认接口地址
-
-
-def _默认方案():
-    return {
-        "api_key": "",
-        "base_url": 默认接口地址,
-        "model": 默认模型,
-        "prompt": 默认提示词,
-    }
-
-
-def _补齐方案(方案):
-    # 只保证四个键存在，不强填默认值——空就是没填好，列表要打未配置标。
-    # 翻译时缺地址模型再临时用默认，不写回文件。
-    if not isinstance(方案, dict):
-        方案 = {}
-    出 = {}
-    for 键 in ("api_key", "base_url", "model", "prompt"):
-        值 = 方案.get(键, "")
-        出[键] = str(值).strip() if isinstance(值, str) else (值 or "")
-    if 出.get("api_key") is None:
-        出["api_key"] = ""
-    return 出
-
-
-def _规范化数据(原始):
-    # 把老版单层格式和新版多方案格式统一成 {"current":..., "profiles":{...}}
-    if not isinstance(原始, dict):
-        原始 = {}
-    if "profiles" in 原始 and isinstance(原始["profiles"], dict) and 原始["profiles"]:
-        方案集 = {名: _补齐方案(配) for 名, 配 in 原始["profiles"].items()}
-        当前 = 原始.get("current")
-        if 当前 not in 方案集:
-            当前 = next(iter(方案集))
-        return {"current": 当前, "profiles": 方案集}
-    # 老版单层：整个 dict 就是一个方案（保留用户原来的值）
-    老方案 = {}
-    for 键 in ("api_key", "base_url", "model", "prompt"):
-        if 键 in 原始:
-            老方案[键] = 原始[键]
-    if 老方案 or True:
-        # 即使是空文件，也保留成 default 方案（值用默认补齐）
-        return {"current": "default", "profiles": {"default": _补齐方案(老方案)}}
-
-
-def _读取原始():
-    if not os.path.exists(配置文件路径):
-        return None
-    try:
-        with open(配置文件路径, "r", encoding="utf-8") as 文件:
-            return json.load(文件)
-    except (OSError, ValueError):
-        return None
-
-
-def _写入数据(数据):
-    with open(配置文件路径, "w", encoding="utf-8") as 文件:
-        json.dump(数据, 文件, ensure_ascii=False, indent=2)
-
-
-def load_profiles():
-    """返回规范化后的多方案数据 {"current":..., "profiles":{...}}，顺手迁移老格式。"""
-    原始 = _读取原始()
-    if 原始 is None:
-        数据 = {"current": "default", "profiles": {"default": _默认方案()}}
-        try:
-            _写入数据(数据)
-        except OSError:
-            pass
-        return {"current": "default", "profiles": {"default": dict(数据["profiles"]["default"])}}
-    数据 = _规范化数据(原始)
-    # 老格式或缺字段时回写，实现自动迁移（保留用户原来的值）
-    try:
-        _写入数据(数据)
-    except OSError:
-        pass
-    return 数据
-
-
-def get_current_name():
-    """返回当前方案名。"""
-    return load_profiles()["current"]
-
-
-def load_config():
-    """读取当前方案的配置（兼容老调用：返回单层 dict）。"""
-    数据 = load_profiles()
-    当前 = 数据["current"]
-    方案 = 数据["profiles"].get(当前)
-    if 方案 is None:
-        当前 = next(iter(data_profiles(数据)))
-        方案 = 数据["profiles"][当前]
-    return dict(方案)
-
-
-def data_profiles(数据):
-    return 数据["profiles"]
-
-
-def save_config(api_key, base_url, model, prompt=None):
-    """保存到当前方案。老调用 save_config(key, url, model) 照样能用；prompt 不传则保留原值。"""
-    数据 = load_profiles()
-    当前 = 数据["current"]
-    旧 = 数据["profiles"].get(当前, {})
-    if prompt is None:
-        prompt = 旧.get("prompt", 默认提示词)
-    if base_url is None or str(base_url).strip() == "":
-        base_url = 默认接口地址
-    if model is None or str(model).strip() == "":
-        model = 默认模型
-    if api_key is None:
-        api_key = ""
-    数据["profiles"][当前] = _补齐方案(
-        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt}
-    )
-    _写入数据(数据)
-    return dict(数据["profiles"][当前])
-
-
-def save_profile(name, api_key="", base_url="", model="", prompt=""):
-    """新建或更新一个方案（不切换当前）。返回存好的方案。"""
-    名 = str(name or "").strip()
-    if not 名:
-        raise Exception("方案名字不能为空。")
-    数据 = load_profiles()
-    数据["profiles"][名] = _补齐方案(
-        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt}
-    )
-    _写入数据(数据)
-    return dict(数据["profiles"][名])
-
-
-def switch_profile(name):
-    """切换当前方案。没填好的方案不让切，避免翻不出。"""
-    名 = str(name or "").strip()
-    数据 = load_profiles()
-    if 名 not in 数据["profiles"]:
-        raise Exception("没有这个方案：" + 名)
-    if not is_profile_configured(名, 数据):
-        raise Exception("这套还没填好，填好保存后才能用。")
-    数据["current"] = 名
-    _写入数据(数据)
-    return dict(数据["profiles"][名])
-
-
-def create_empty_profile(name):
-    """新建一套空方案（地址钥匙模型留空，只带默认提示词），不切换当前。重名会报错。"""
-    名 = str(name or "").strip()
-    if not 名:
-        raise Exception("方案名字不能为空。")
-    数据 = load_profiles()
-    if 名 in 数据["profiles"]:
-        raise Exception("已经有这个名字了，换个名字。")
-    数据["profiles"][名] = {
-        "api_key": "",
-        "base_url": "",
-        "model": "",
-        "prompt": 默认提示词,
-    }
-    _写入数据(数据)
-    return dict(数据["profiles"][名])
-
-
-def is_profile_configured(name, 数据=None):
-    """这套填好了没有：地址钥匙模型三样都有才算好，供切换和列表打标用。"""
-    try:
-        数据 = 数据 or load_profiles()
-        方案 = 数据["profiles"].get(str(name or "").strip(), {})
-        return bool(
-            str(方案.get("base_url", "")).strip()
-            and str(方案.get("api_key", "")).strip()
-            and str(方案.get("model", "")).strip()
-        )
-    except Exception:
-        return False
-
-
-def delete_profile(name):
-    """删除一个方案。删的是当前用的会自动换到另一个；最后一个不让删。返回切换后的当前名。"""
-    名 = str(name or "").strip()
-    数据 = load_profiles()
-    if 名 not in 数据["profiles"]:
-        raise Exception("没有这个方案：" + 名)
-    if len(数据["profiles"]) <= 1:
-        raise Exception("只剩最后一个方案了，不能再删。")
-    del 数据["profiles"][名]
-    if 数据["current"] == 名:
-        数据["current"] = next(iter(数据["profiles"]))
-    _写入数据(数据)
-    return 数据["current"]
 
 
 def _call_api(系统提示, 用户内容, on_chunk=None, cancel=None):

@@ -1,0 +1,957 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 2974302..73e1a70 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -7,8 +7,9 @@
+ | 文件/目录 | 职责 |
+ |---|---|
+ | `translator_domain.py` | 契约层：意图（查词/翻译）与结果（译文/词典/失败）的类型，不联网、不读文件 |
+-| `translator_core.py` | 能力层：配置读写、调模型接口、结果归一化；唯一入口是 `run_intent` |
++| `translator_core.py` | 能力层：结果归一化；唯一入口是 `run_intent` |
+ | `translator_provider.py` | 接口驱动：OpenAI 兼容请求、SSE 流式、取消；不读配置、不碰界面 |
++| `translator_settings.py` | 配置层：路径、schema、原子写、DPAPI 加密、旧配置迁移 |
+ | `app.py` | 展示层：触发、剪贴板、配置窗、渲染、托盘；不判断词句、不拼提示词 |
+ | `tests/` | 标准库 unittest，全部离线；跑：`python -m unittest discover -s tests -v` |
+ | `docs/architecture-redesign.md` | 目标架构、契约、迁移顺序（第 2–4 步未做）、验收单 |
+@@ -16,7 +17,7 @@
+ 
+ ## 依赖方向
+ 
+-`app → core → provider/domain`，不许反向；界面和 core 都不 import requests，不拼 URL，不解析错误文字。
++`app → core → provider/domain`，不许反向；`app` 与 `core` 都可读 `settings`，`settings` 不依赖本项目其他模块；界面和 core 都不 import requests，不拼 URL，不解析错误文字。
+ 
+ ## 交付规矩
+ 
+diff --git a/app.py b/app.py
+index f7ff555..c71eded 100644
+--- a/app.py
++++ b/app.py
+@@ -14,8 +14,8 @@ from tkinter import font as tkfont
+ from tkinter import messagebox, simpledialog, ttk
+ 
+ try:
+-    from translator_core import (
+-        run_intent,
++    from translator_core import run_intent
++    from translator_settings import (
+         load_config,
+         save_config,
+         load_profiles,
+diff --git a/docs/architecture-redesign.md b/docs/architecture-redesign.md
+index 635a742..d461062 100644
+--- a/docs/architecture-redesign.md
++++ b/docs/architecture-redesign.md
+@@ -1,6 +1,6 @@
+ # 翻译小助手 · 架构重设计（意图与结果）
+ 
+-- 状态：第 1–2 步已实施，待用户按第 8 节验收
++- 状态：第 1–3 步已实施，待用户按第 8 节验收
+ - 日期：2026-10-24
+ - 任务级别：L2（同应用内多文件重构，可回退，无数据变更）
+ - 本文范围：目标架构 + 迁移顺序 + 第 1 步的验收证据；不包含第 2–5 步的实现
+@@ -62,17 +62,17 @@
+ | 模块 | 只负责 | 不负责 | 允许依赖 |
+ |---|---|---|---|
+ | `translator_domain.py` | Intent/Result 类型、词句判断、错误分类 | 网络、文件、界面 | 无（仅标准库） |
+-| `translator_core.py` | 配置读写、HTTP 调用、结果归一化、`run_intent` 入口 | 界面、排版 | domain、requests |
+-| `app.py` | 触发、剪贴板、配置窗、渲染、托盘、单实例 | 判断词句、拼提示词、解析错误 | domain、core、Tk |
+-| （后续）`translator_provider.py` | 供应商适配、重试、取消、流式 | 业务策略 | core 的请求结构 |
+-| （后续）`translator_settings.py` | schema、原子写、凭据 | 网络、界面 | 系统凭据 |
++| `translator_core.py` | 结果归一化、`run_intent` 入口 | 配置存储、HTTP、界面 | domain、provider、settings |
++| `translator_provider.py` | OpenAI 兼容请求、SSE 流式、取消 | 配置、业务策略、界面 | domain、requests |
++| `translator_settings.py` | 路径、schema、原子写、DPAPI 加密、迁移 | 网络、界面 | 标准库 |
++| `app.py` | 触发、剪贴板、配置窗、渲染、托盘、单实例 | 判断词句、拼提示词、解析错误 | domain、core、settings、Tk |
+ 
+ ### 3.2 依赖规则
+ 
+-1. 依赖只能向下：`app → core → domain`。domain 不 import 任何本项目模块。
+-2. 界面不 import `requests`，不拼 URL，不解析响应。
++1. 依赖只能向下：`app → core → provider/domain`；`app` 与 `core` 都可读 `settings`；`settings` 与 `domain` 不 import 本项目其他模块。
++2. 界面和 core 都不 import `requests`，不拼 URL，不解析响应。
+ 3. core 不 import `tkinter`，不知道“弹窗”存在。
+-4. 失败只能在 domain 定义一次；core 负责把网络/协议错误翻译成 `Failure`。
++4. 失败只能在 domain 定义一次；provider 把网络/协议错误转成 `Failure`，core 收敛成 Result。
+ 
+ ### 3.3 数据流
+ 
+@@ -136,6 +136,8 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ - **D6 线程模型**：第 1 步不动；第 2 步改为“请求号 + 取消事件”，新的顶掉旧的。仍是一次请求一个线程，单队列未做（见 D8）。
+ - **D7 不加依赖**：测试用标准库 `unittest`；HTTP 仍用已有 `requests`。
+ - **D8 用请求号代替单队列**：行为等价（只有最后一次可见），实现更小；不做线程池/队列。
++- **D9 配置放用户目录**：`%LOCALAPPDATA%\翻译小助手\config.json`，不再跟 exe/脚本走；解决打包后临时目录丢配置。
++- **D10 用 DPAPI 而不是凭据管理器**：不加新依赖、天然支持多方案；代价是换机器/换用户解不开，需要重填钥匙。
+ 
+ ---
+ 
+@@ -177,9 +179,9 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ 
+ | 风险 | 影响 | 处理 |
+ |---|---|---|
+-| 配置路径在 exe 解压临时目录 | 打包后设置可能存不住 | 第 3 步一并处理；先按验收单实测一次 |
+-| 密钥明文在磁盘 | 转发文件夹会带走 | 未进版本库（已查）；第 3 步移入系统凭据 |
+-| 每次点击一个线程 | 连点可能旧结果覆盖新结果 | 第 2 步单队列；本步不伪装已修 |
++| 配置路径在 exe 解压临时目录 | 打包后设置可能存不住 | 第 3 步已改为 `%LOCALAPPDATA%\翻译小助手\config.json` |
++| 密钥明文在磁盘 | 转发文件夹会带走 | 第 3 步已用 DPAPI 加密；旧 `config.json`、`config.my.json` 仍是明文，待用户确认删除 |
++| 每次点击一个线程 | 连点可能旧结果覆盖新结果 | 第 2 步已用请求号 + 取消；线程仍按请求创建 |
+ | 只有 Windows 实现 | 换平台要重写入口层 | 入口层已隔离，domain/core 可复用 |
+ | 无 UI 自动化测试 | 渲染回归靠人工 | 第 4 步加截图对比；本步给人工验收单 |
+ 
+@@ -194,6 +196,9 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ 5. 断网后翻译 → □ 提示网络连接失败，不是白屏或英文报错。
+ 6. 在输入框打一段长英文 → 点“翻译输入” → 立刻换成另一段 → 再点“翻译输入” → □ 最终只显示后一次的内容，先一次不会覆盖回来。
+ 7. 翻译一段较长的英文 → □ 文字边生成边出现，不是等整段完成才一次性出现。
++8. 托盘“退出”后再打开程序 → □ 方案还在，不用重填。
++9. 打开 `%LOCALAPPDATA%\翻译小助手\config.json` → □ 看不到 `sk-` 开头的明文钥匙，只有 `api_key_dpapi` 一串字符。
++10. 把程序文件夹里的旧 `config.json` 改名或移走 → 再打开程序 → □ 翻译仍正常（说明用的是新位置）。
+ 
+ ---
+ 
+@@ -225,3 +230,25 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
+ - 没做字面意义的单队列/线程池；用请求号 + 取消事件达到“只有最后一次可见”（D8）。
+ - 没做超时专项单测（断网用例覆盖 `RequestException`）。
+ 
++## 11. 第 3 步落地记录（2026-10-24）
++
++### 做
++
++- 新增 `translator_settings.py`：配置路径、schema 版本 2、原子写、备份、旧格式迁移、DPAPI 加解密。
++- 配置改到 `%LOCALAPPDATA%\翻译小助手\config.json`；测试可用 `TRANSLATOR_CONFIG_DIR` 指定临时目录。
++- 旧单层/多方案配置自动迁移；迁移前留 `config.json.bak-*`；损坏文件先备份再回默认。
++- 钥匙存为 `api_key_dpapi`，读写时加解密；磁盘不再出现明文。
++- `translator_core` 不再管配置；`app.py` 的配置函数改从 `translator_settings` 导入。
++
++### 验证
++
++- 单测 40 条全绿（新增 10 条 settings 测试：首次建配置、迁移、加密、备份、损坏、切换/删除、提示词保留）。
++- 真实配置演练：两个方案迁移，钥匙往返一致，明文不进新文件，旧文件哈希不变，备份 1 份。
++- 真实迁移到 `%LOCALAPPDATA%`：磁盘 `version=2`、`api_key_dpapi`、无明文；迁移后真实翻译成功。
++- `py_compile` 8 个文件通过；导入冒烟 `CORE_OK=True`。
++
++### 未做 / 待用户确认
++
++- 程序目录里的旧 `config.json` 和 `config.my.json` 仍是明文钥匙，需用户确认后删除。
++- exe 尚未重打；打包后第一次启动会迁移。
++
+diff --git a/translator_core.py b/translator_core.py
+index 42c1447..bdf6e25 100644
+--- a/translator_core.py
++++ b/translator_core.py
+@@ -1,12 +1,11 @@
+ """翻译核心：英文到中文的后端单元。
+-[INPUT] 英文文本 + config.json 当前方案（api_key / base_url / model / prompt）。
++[INPUT] 英文文本 + 当前方案（由 translator_settings 读取）。
+ [OUTPUT] 译文 / 词典 / 类型化 Failure；界面只经 run_intent 进入。
+-[POS] 能力层：被 app.py 使用；向上不认识界面，向下依赖 translator_domain 与 translator_provider。
+-[PROTOCOL] 通过 translator_provider 调 OpenAI 兼容接口；老版单层 config.json 自动迁移。
++[POS] 能力层：被 app.py 使用；向上不认识界面，向下依赖 domain/provider/settings。
++[PROTOCOL] 通过 translator_provider 调 OpenAI 兼容接口；配置迁移与加密在 translator_settings。
+ """
+ 
+ import json
+-import os
+ 
+ from translator_domain import (
+     CONFIG,
+@@ -21,13 +20,7 @@ from translator_domain import (
+     is_single_word,
+ )
+ from translator_provider import chat as _驱动对话
+-
+-默认提示词 = "你是翻译，只返回中文译文，代码和路径不要翻译，保持原样。"
+-默认接口地址 = "https://opencode.ai/inference/openai/v1"
+-默认模型 = "deepseek-v4.1-flash"
+-
+-# 配置文件放在本文件同一目录
+-配置文件路径 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
++from translator_settings import 默认接口地址, 默认模型, 默认提示词, load_config
+ 
+ 
+ def _整理接口地址(地址):
+@@ -37,196 +30,6 @@ def _整理接口地址(地址):
+     return str(地址).strip().rstrip("/") or 默认接口地址
+ 
+ 
+-def _默认方案():
+-    return {
+-        "api_key": "",
+-        "base_url": 默认接口地址,
+-        "model": 默认模型,
+-        "prompt": 默认提示词,
+-    }
+-
+-
+-def _补齐方案(方案):
+-    # 只保证四个键存在，不强填默认值——空就是没填好，列表要打未配置标。
+-    # 翻译时缺地址模型再临时用默认，不写回文件。
+-    if not isinstance(方案, dict):
+-        方案 = {}
+-    出 = {}
+-    for 键 in ("api_key", "base_url", "model", "prompt"):
+-        值 = 方案.get(键, "")
+-        出[键] = str(值).strip() if isinstance(值, str) else (值 or "")
+-    if 出.get("api_key") is None:
+-        出["api_key"] = ""
+-    return 出
+-
+-
+-def _规范化数据(原始):
+-    # 把老版单层格式和新版多方案格式统一成 {"current":..., "profiles":{...}}
+-    if not isinstance(原始, dict):
+-        原始 = {}
+-    if "profiles" in 原始 and isinstance(原始["profiles"], dict) and 原始["profiles"]:
+-        方案集 = {名: _补齐方案(配) for 名, 配 in 原始["profiles"].items()}
+-        当前 = 原始.get("current")
+-        if 当前 not in 方案集:
+-            当前 = next(iter(方案集))
+-        return {"current": 当前, "profiles": 方案集}
+-    # 老版单层：整个 dict 就是一个方案（保留用户原来的值）
+-    老方案 = {}
+-    for 键 in ("api_key", "base_url", "model", "prompt"):
+-        if 键 in 原始:
+-            老方案[键] = 原始[键]
+-    if 老方案 or True:
+-        # 即使是空文件，也保留成 default 方案（值用默认补齐）
+-        return {"current": "default", "profiles": {"default": _补齐方案(老方案)}}
+-
+-
+-def _读取原始():
+-    if not os.path.exists(配置文件路径):
+-        return None
+-    try:
+-        with open(配置文件路径, "r", encoding="utf-8") as 文件:
+-            return json.load(文件)
+-    except (OSError, ValueError):
+-        return None
+-
+-
+-def _写入数据(数据):
+-    with open(配置文件路径, "w", encoding="utf-8") as 文件:
+-        json.dump(数据, 文件, ensure_ascii=False, indent=2)
+-
+-
+-def load_profiles():
+-    """返回规范化后的多方案数据 {"current":..., "profiles":{...}}，顺手迁移老格式。"""
+-    原始 = _读取原始()
+-    if 原始 is None:
+-        数据 = {"current": "default", "profiles": {"default": _默认方案()}}
+-        try:
+-            _写入数据(数据)
+-        except OSError:
+-            pass
+-        return {"current": "default", "profiles": {"default": dict(数据["profiles"]["default"])}}
+-    数据 = _规范化数据(原始)
+-    # 老格式或缺字段时回写，实现自动迁移（保留用户原来的值）
+-    try:
+-        _写入数据(数据)
+-    except OSError:
+-        pass
+-    return 数据
+-
+-
+-def get_current_name():
+-    """返回当前方案名。"""
+-    return load_profiles()["current"]
+-
+-
+-def load_config():
+-    """读取当前方案的配置（兼容老调用：返回单层 dict）。"""
+-    数据 = load_profiles()
+-    当前 = 数据["current"]
+-    方案 = 数据["profiles"].get(当前)
+-    if 方案 is None:
+-        当前 = next(iter(data_profiles(数据)))
+-        方案 = 数据["profiles"][当前]
+-    return dict(方案)
+-
+-
+-def data_profiles(数据):
+-    return 数据["profiles"]
+-
+-
+-def save_config(api_key, base_url, model, prompt=None):
+-    """保存到当前方案。老调用 save_config(key, url, model) 照样能用；prompt 不传则保留原值。"""
+-    数据 = load_profiles()
+-    当前 = 数据["current"]
+-    旧 = 数据["profiles"].get(当前, {})
+-    if prompt is None:
+-        prompt = 旧.get("prompt", 默认提示词)
+-    if base_url is None or str(base_url).strip() == "":
+-        base_url = 默认接口地址
+-    if model is None or str(model).strip() == "":
+-        model = 默认模型
+-    if api_key is None:
+-        api_key = ""
+-    数据["profiles"][当前] = _补齐方案(
+-        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt}
+-    )
+-    _写入数据(数据)
+-    return dict(数据["profiles"][当前])
+-
+-
+-def save_profile(name, api_key="", base_url="", model="", prompt=""):
+-    """新建或更新一个方案（不切换当前）。返回存好的方案。"""
+-    名 = str(name or "").strip()
+-    if not 名:
+-        raise Exception("方案名字不能为空。")
+-    数据 = load_profiles()
+-    数据["profiles"][名] = _补齐方案(
+-        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt}
+-    )
+-    _写入数据(数据)
+-    return dict(数据["profiles"][名])
+-
+-
+-def switch_profile(name):
+-    """切换当前方案。没填好的方案不让切，避免翻不出。"""
+-    名 = str(name or "").strip()
+-    数据 = load_profiles()
+-    if 名 not in 数据["profiles"]:
+-        raise Exception("没有这个方案：" + 名)
+-    if not is_profile_configured(名, 数据):
+-        raise Exception("这套还没填好，填好保存后才能用。")
+-    数据["current"] = 名
+-    _写入数据(数据)
+-    return dict(数据["profiles"][名])
+-
+-
+-def create_empty_profile(name):
+-    """新建一套空方案（地址钥匙模型留空，只带默认提示词），不切换当前。重名会报错。"""
+-    名 = str(name or "").strip()
+-    if not 名:
+-        raise Exception("方案名字不能为空。")
+-    数据 = load_profiles()
+-    if 名 in 数据["profiles"]:
+-        raise Exception("已经有这个名字了，换个名字。")
+-    数据["profiles"][名] = {
+-        "api_key": "",
+-        "base_url": "",
+-        "model": "",
+-        "prompt": 默认提示词,
+-    }
+-    _写入数据(数据)
+-    return dict(数据["profiles"][名])
+-
+-
+-def is_profile_configured(name, 数据=None):
+-    """这套填好了没有：地址钥匙模型三样都有才算好，供切换和列表打标用。"""
+-    try:
+-        数据 = 数据 or load_profiles()
+-        方案 = 数据["profiles"].get(str(name or "").strip(), {})
+-        return bool(
+-            str(方案.get("base_url", "")).strip()
+-            and str(方案.get("api_key", "")).strip()
+-            and str(方案.get("model", "")).strip()
+-        )
+-    except Exception:
+-        return False
+-
+-
+-def delete_profile(name):
+-    """删除一个方案。删的是当前用的会自动换到另一个；最后一个不让删。返回切换后的当前名。"""
+-    名 = str(name or "").strip()
+-    数据 = load_profiles()
+-    if 名 not in 数据["profiles"]:
+-        raise Exception("没有这个方案：" + 名)
+-    if len(数据["profiles"]) <= 1:
+-        raise Exception("只剩最后一个方案了，不能再删。")
+-    del 数据["profiles"][名]
+-    if 数据["current"] == 名:
+-        数据["current"] = next(iter(数据["profiles"]))
+-    _写入数据(数据)
+-    return 数据["current"]
+-
+-
+ def _call_api(系统提示, 用户内容, on_chunk=None, cancel=None):
+     """调一次当前方案的接口，返回模型原文。缺钥匙抛 CONFIG 失败。"""
+     配置 = load_config()
+diff --git "a/\344\275\277\347\224\250\350\257\264\346\230\216.txt" "b/\344\275\277\347\224\250\350\257\264\346\230\216.txt"
+index 5495d1d..97369d7 100644
+--- "a/\344\275\277\347\224\250\350\257\264\346\230\216.txt"
++++ "b/\344\275\277\347\224\250\350\257\264\346\230\216.txt"
+@@ -44,6 +44,7 @@
+ 右边三样地址钥匙模型差一样都存不上，会提醒你补全。
+ 不想要了就在左边点中它再点删除，只剩最后一个时不能删。
+ 配东西的时候，点外面窗口不会藏起来，放心填。
++配置存在电脑的用户目录里，不在程序文件夹里；钥匙是加密保存的。旧版程序旁边的 config.json 已经不用了，里面是明文钥匙，建议删掉。
+ 
+ 小提醒：
+ 1. 每次只轻轻点一下 Ctrl 就好，不要一直按着。
+diff --git a/translator_settings.py b/translator_settings.py
+new file mode 100644
+index 0000000..e9e7948
+--- /dev/null
++++ b/translator_settings.py
+@@ -0,0 +1,416 @@
++"""配置与密钥存储：路径、迁移、原子写、Windows 当前用户加密。
++
++[INPUT] 用户方案（地址/模型/提示词/明文钥匙）；旧版 config.json。
++[OUTPUT] 规范化多方案数据；磁盘上钥匙是 DPAPI 密文，配置在用户目录。
++[POS] 配置层；被 translator_core 与 app.py 使用；不联网、不碰界面。
++[PROTOCOL] 磁盘格式 {"version":2,"current":...,"profiles":{名:{base_url,model,prompt,api_key_dpapi}}}。
++"""
++
++import base64
++import ctypes
++import json
++import os
++import shutil
++import sys
++import time
++
++默认提示词 = "你是翻译，只返回中文译文，代码和路径不要翻译，保持原样。"
++默认接口地址 = "https://opencode.ai/inference/openai/v1"
++默认模型 = "deepseek-v4.1-flash"
++配置版本 = 2
++目录名 = "翻译小助手"
++
++HAS_DPAPI = sys.platform == "win32" and hasattr(ctypes, "windll")
++
++
++class _数据块(ctypes.Structure):
++    _fields_ = [
++        ("cbData", ctypes.c_uint32),
++        ("pbData", ctypes.POINTER(ctypes.c_char)),
++    ]
++
++
++if HAS_DPAPI:
++    _CryptProtectData = ctypes.windll.crypt32.CryptProtectData
++    _CryptProtectData.argtypes = [
++        ctypes.POINTER(_数据块),
++        ctypes.c_wchar_p,
++        ctypes.POINTER(_数据块),
++        ctypes.c_void_p,
++        ctypes.c_void_p,
++        ctypes.c_uint32,
++        ctypes.POINTER(_数据块),
++    ]
++    _CryptProtectData.restype = ctypes.c_int
++
++    _CryptUnprotectData = ctypes.windll.crypt32.CryptUnprotectData
++    _CryptUnprotectData.argtypes = [
++        ctypes.POINTER(_数据块),
++        ctypes.c_void_p,
++        ctypes.POINTER(_数据块),
++        ctypes.c_void_p,
++        ctypes.c_void_p,
++        ctypes.c_uint32,
++        ctypes.POINTER(_数据块),
++    ]
++    _CryptUnprotectData.restype = ctypes.c_int
++
++    _LocalFree = ctypes.windll.kernel32.LocalFree
++    _LocalFree.argtypes = [ctypes.c_void_p]
++    _LocalFree.restype = ctypes.c_void_p
++
++
++def 配置目录():
++    指定 = os.environ.get("TRANSLATOR_CONFIG_DIR", "").strip()
++    if 指定:
++        return os.path.abspath(指定)
++    根 = os.environ.get("LOCALAPPDATA", "").strip() or os.path.expanduser("~")
++    return os.path.join(根, 目录名)
++
++
++def 配置路径():
++    return os.path.join(配置目录(), "config.json")
++
++
++def 旧配置路径们():
++    候选 = []
++    for 目录 in (
++        os.path.dirname(os.path.abspath(__file__)),
++        os.path.dirname(os.path.abspath(sys.executable)),
++    ):
++        路径 = os.path.join(目录, "config.json")
++        if 路径 not in 候选:
++            候选.append(路径)
++    return 候选
++
++
++def _块(数据):
++    缓冲 = ctypes.create_string_buffer(数据, len(数据))
++    return _数据块(len(数据), ctypes.cast(缓冲, ctypes.POINTER(ctypes.c_char))), 缓冲
++
++
++def _保护(明文):
++    if not HAS_DPAPI:
++        raise OSError("当前系统不支持密钥加密")
++    输入块, _保活 = _块(明文.encode("utf-8"))
++    输出块 = _数据块()
++    成功 = _CryptProtectData(
++        ctypes.byref(输入块), None, None, None, None, 0, ctypes.byref(输出块)
++    )
++    if not 成功:
++        raise OSError(ctypes.GetLastError(), "密钥加密失败")
++    try:
++        密文 = ctypes.string_at(输出块.pbData, 输出块.cbData)
++    finally:
++        _LocalFree(ctypes.cast(输出块.pbData, ctypes.c_void_p))
++    return base64.b64encode(密文).decode("ascii")
++
++
++def _解开(令牌):
++    if not HAS_DPAPI:
++        return ""
++    try:
++        数据 = base64.b64decode(str(令牌), validate=True)
++    except (ValueError, TypeError):
++        return ""
++    if not 数据:
++        return ""
++    输入块, _保活 = _块(数据)
++    输出块 = _数据块()
++    成功 = _CryptUnprotectData(
++        ctypes.byref(输入块), None, None, None, None, 0, ctypes.byref(输出块)
++    )
++    if not 成功:
++        return ""
++    try:
++        明文 = ctypes.string_at(输出块.pbData, 输出块.cbData)
++    finally:
++        _LocalFree(ctypes.cast(输出块.pbData, ctypes.c_void_p))
++    try:
++        return 明文.decode("utf-8")
++    except UnicodeDecodeError:
++        return ""
++
++
++def _默认方案():
++    return {
++        "api_key": "",
++        "base_url": 默认接口地址,
++        "model": 默认模型,
++        "prompt": 默认提示词,
++    }
++
++
++def _补齐方案(方案):
++    if not isinstance(方案, dict):
++        方案 = {}
++    出 = {}
++    for 键 in ("api_key", "base_url", "model", "prompt"):
++        值 = 方案.get(键, "")
++        出[键] = 值.strip() if isinstance(值, str) else ("" if 值 is None else str(值))
++    return 出
++
++
++def _带钥匙(方案):
++    if not isinstance(方案, dict):
++        return _默认方案()
++    明文 = 方案.get("api_key", "")
++    令牌 = 方案.get("api_key_dpapi", "")
++    if isinstance(令牌, str) and 令牌.strip() and HAS_DPAPI:
++        解开 = _解开(令牌)
++        if 解开:
++            明文 = 解开
++    return _补齐方案(
++        {
++            "api_key": 明文,
++            "base_url": 方案.get("base_url", ""),
++            "model": 方案.get("model", ""),
++            "prompt": 方案.get("prompt", ""),
++        }
++    )
++
++
++def _规范化数据(原始):
++    if not isinstance(原始, dict):
++        原始 = {}
++    方案集原始 = 原始.get("profiles")
++    if isinstance(方案集原始, dict) and 方案集原始:
++        方案集 = {名: _带钥匙(配) for 名, 配 in 方案集原始.items()}
++        当前 = 原始.get("current")
++        if 当前 not in 方案集:
++            当前 = next(iter(方案集))
++        return {"version": 配置版本, "current": 当前, "profiles": 方案集}
++    老方案 = {
++        键: 原始[键]
++        for 键 in ("api_key", "base_url", "model", "prompt")
++        if 键 in 原始
++    }
++    return {
++        "version": 配置版本,
++        "current": "default",
++        "profiles": {"default": _带钥匙(老方案)},
++    }
++
++
++def _空数据():
++    return {
++        "version": 配置版本,
++        "current": "default",
++        "profiles": {"default": _默认方案()},
++    }
++
++
++def _读取原始():
++    for 路径 in [配置路径()] + 旧配置路径们():
++        if not os.path.exists(路径):
++            continue
++        try:
++            with open(路径, "r", encoding="utf-8") as 文件:
++                return json.load(文件), 路径
++        except (OSError, ValueError):
++            return None, 路径
++    return None, None
++
++
++def _需要回写(原始, 来源):
++    if not isinstance(原始, dict):
++        return True
++    if 来源 != 配置路径():
++        return True
++    if 原始.get("version") != 配置版本:
++        return True
++    方案集 = 原始.get("profiles")
++    if not isinstance(方案集, dict) or not 方案集:
++        return True
++    if HAS_DPAPI:
++        for 方案 in 方案集.values():
++            if not isinstance(方案, dict):
++                return True
++            if str(方案.get("api_key", "")).strip():
++                return True
++    return False
++
++
++def _备份(路径):
++    try:
++        os.makedirs(配置目录(), exist_ok=True)
++        标记 = time.strftime("%Y%m%d-%H%M%S") + "-" + str(time.time_ns() % 1000000)
++        目标 = os.path.join(配置目录(), "config.json.bak-" + 标记)
++        shutil.copy2(路径, 目标)
++    except OSError:
++        pass
++
++
++def _写入数据(数据):
++    目录 = 配置目录()
++    os.makedirs(目录, exist_ok=True)
++    路径 = 配置路径()
++    磁盘 = {
++        "version": 配置版本,
++        "current": 数据.get("current", "default"),
++        "profiles": {},
++    }
++    for 名, 方案 in 数据.get("profiles", {}).items():
++        完整 = _补齐方案(方案)
++        项 = {
++            "base_url": 完整["base_url"],
++            "model": 完整["model"],
++            "prompt": 完整["prompt"],
++        }
++        钥匙 = 完整["api_key"]
++        if 钥匙:
++            if HAS_DPAPI:
++                项["api_key_dpapi"] = _保护(钥匙)
++            else:
++                项["api_key"] = 钥匙
++        磁盘["profiles"][名] = 项
++    临时 = 路径 + ".tmp"
++    try:
++        with open(临时, "w", encoding="utf-8") as 文件:
++            json.dump(磁盘, 文件, ensure_ascii=False, indent=2)
++            文件.flush()
++            os.fsync(文件.fileno())
++        os.replace(临时, 路径)
++    except OSError:
++        try:
++            os.remove(临时)
++        except OSError:
++            pass
++        raise
++
++
++def _复制(数据):
++    return {
++        "version": 配置版本,
++        "current": 数据["current"],
++        "profiles": {名: dict(方案) for 名, 方案 in 数据["profiles"].items()},
++    }
++
++
++def load_profiles():
++    """读取当前方案集；旧格式自动迁移，钥匙解密后返回。"""
++    原始, 来源 = _读取原始()
++    if 原始 is None:
++        if 来源:
++            _备份(来源)
++        数据 = _空数据()
++        _写入数据(数据)
++        return _复制(数据)
++    数据 = _规范化数据(原始)
++    if _需要回写(原始, 来源):
++        if 来源 and os.path.abspath(来源) != os.path.abspath(配置路径()):
++            _备份(来源)
++        _写入数据(数据)
++    return _复制(数据)
++
++
++def get_current_name():
++    return load_profiles()["current"]
++
++
++def load_config():
++    """读取当前方案（兼容老调用：返回单层 dict）。"""
++    数据 = load_profiles()
++    当前 = 数据["current"]
++    方案 = 数据["profiles"].get(当前)
++    if 方案 is None:
++        当前 = next(iter(data_profiles(数据)))
++        方案 = 数据["profiles"][当前]
++    return dict(方案)
++
++
++def data_profiles(数据):
++    return 数据["profiles"]
++
++
++def save_config(api_key, base_url, model, prompt=None):
++    """保存到当前方案。prompt 不传则保留原值。"""
++    数据 = load_profiles()
++    当前 = 数据["current"]
++    旧 = 数据["profiles"].get(当前, {})
++    if prompt is None:
++        prompt = 旧.get("prompt", 默认提示词)
++    if base_url is None or str(base_url).strip() == "":
++        base_url = 默认接口地址
++    if model is None or str(model).strip() == "":
++        model = 默认模型
++    if api_key is None:
++        api_key = ""
++    数据["profiles"][当前] = _补齐方案(
++        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt}
++    )
++    _写入数据(数据)
++    return dict(数据["profiles"][当前])
++
++
++def save_profile(name, api_key="", base_url="", model="", prompt=""):
++    """新建或更新一个方案（不切换当前）。返回存好的方案。"""
++    名 = str(name or "").strip()
++    if not 名:
++        raise Exception("方案名字不能为空。")
++    数据 = load_profiles()
++    数据["profiles"][名] = _补齐方案(
++        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt}
++    )
++    _写入数据(数据)
++    return dict(数据["profiles"][名])
++
++
++def switch_profile(name):
++    """切换当前方案。没填好的方案不让切，避免翻不出。"""
++    名 = str(name or "").strip()
++    数据 = load_profiles()
++    if 名 not in 数据["profiles"]:
++        raise Exception("没有这个方案：" + 名)
++    if not is_profile_configured(名, 数据):
++        raise Exception("这套还没填好，填好保存后才能用。")
++    数据["current"] = 名
++    _写入数据(数据)
++    return dict(数据["profiles"][名])
++
++
++def create_empty_profile(name):
++    """新建一套空方案（地址钥匙模型留空，只带默认提示词），不切换当前。"""
++    名 = str(name or "").strip()
++    if not 名:
++        raise Exception("方案名字不能为空。")
++    数据 = load_profiles()
++    if 名 in 数据["profiles"]:
++        raise Exception("已经有这个名字了，换个名字。")
++    数据["profiles"][名] = {
++        "api_key": "",
++        "base_url": "",
++        "model": "",
++        "prompt": 默认提示词,
++    }
++    _写入数据(数据)
++    return dict(数据["profiles"][名])
++
++
++def is_profile_configured(name, 数据=None):
++    """地址钥匙模型三样都有才算好。"""
++    try:
++        数据 = 数据 or load_profiles()
++        方案 = 数据["profiles"].get(str(name or "").strip(), {})
++        return bool(
++            str(方案.get("base_url", "")).strip()
++            and str(方案.get("api_key", "")).strip()
++            and str(方案.get("model", "")).strip()
++        )
++    except Exception:
++        return False
++
++
++def delete_profile(name):
++    """删除一个方案。删当前用的会自动换到另一个；最后一个不让删。"""
++    名 = str(name or "").strip()
++    数据 = load_profiles()
++    if 名 not in 数据["profiles"]:
++        raise Exception("没有这个方案：" + 名)
++    if len(数据["profiles"]) <= 1:
++        raise Exception("只剩最后一个方案了，不能再删。")
++    del 数据["profiles"][名]
++    if 数据["current"] == 名:
++        数据["current"] = next(iter(数据["profiles"]))
++    _写入数据(数据)
++    return 数据["current"]
+diff --git a/tests/test_settings.py b/tests/test_settings.py
+new file mode 100644
+index 0000000..d2daff5
+--- /dev/null
++++ b/tests/test_settings.py
+@@ -0,0 +1,151 @@
++"""配置与密钥存储的单元测试。
++
++[INPUT] 临时目录里的配置文件；Windows 上用真实 DPAPI，不联网。
++[OUTPUT] unittest 断言；覆盖首次建配置、迁移、加密、原子写、方案增删切换。
++[POS] 守护 translator_settings 的磁盘契约与旧配置迁移。
++[PROTOCOL] 运行：python -m unittest discover -s tests -v
++"""
++
++import json
++import os
++import tempfile
++import unittest
++from unittest import mock
++
++import translator_settings as 设置
++
++
++class 配置存储测试(unittest.TestCase):
++    def setUp(self):
++        self.临时目录 = tempfile.TemporaryDirectory()
++        self.addCleanup(self.临时目录.cleanup)
++        self.环境 = mock.patch.dict(
++            os.environ, {"TRANSLATOR_CONFIG_DIR": self.临时目录.name}
++        )
++        self.环境.start()
++        self.addCleanup(self.环境.stop)
++        self.旧路径 = mock.patch.object(设置, "旧配置路径们", return_value=[])
++        self.旧路径.start()
++        self.addCleanup(self.旧路径.stop)
++        self.配置 = os.path.join(self.临时目录.name, "config.json")
++
++    def _写旧文件(self, 内容):
++        路径 = os.path.join(self.临时目录.name, "legacy.json")
++        with open(路径, "w", encoding="utf-8") as 文件:
++            json.dump(内容, 文件, ensure_ascii=False)
++        return 路径
++
++    def _读磁盘(self):
++        with open(self.配置, "r", encoding="utf-8") as 文件:
++            return json.load(文件)
++
++    def _备份文件(self):
++        return [
++            名
++            for 名 in os.listdir(self.临时目录.name)
++            if 名.startswith("config.json.bak-")
++        ]
++
++    def test_首次加载建默认配置(self):
++        数据 = 设置.load_profiles()
++        self.assertEqual(数据["current"], "default")
++        self.assertIn("default", 数据["profiles"])
++        self.assertTrue(os.path.exists(self.配置))
++        self.assertEqual(self._读磁盘()["version"], 2)
++
++    def test_保存后磁盘不含明文钥匙且能读回(self):
++        设置.save_profile("work", "sk-secret-123", "https://x/v1", "m", "提示")
++        with open(self.配置, "r", encoding="utf-8") as 文件:
++            原文 = 文件.read()
++        if 设置.HAS_DPAPI:
++            self.assertNotIn("sk-secret-123", 原文)
++            self.assertIn("api_key_dpapi", 原文)
++        数据 = 设置.load_profiles()
++        self.assertEqual(数据["profiles"]["work"]["api_key"], "sk-secret-123")
++
++    def test_旧单层配置迁移到新目录并留备份(self):
++        旧 = self._写旧文件(
++            {
++                "api_key": "sk-old-123",
++                "base_url": "https://old/v1",
++                "model": "old-model",
++                "prompt": "旧提示",
++            }
++        )
++        with mock.patch.object(设置, "旧配置路径们", return_value=[旧]):
++            数据 = 设置.load_profiles()
++        self.assertEqual(数据["profiles"]["default"]["api_key"], "sk-old-123")
++        self.assertEqual(数据["profiles"]["default"]["model"], "old-model")
++        self.assertTrue(os.path.exists(self.配置))
++        self.assertTrue(self._备份文件())
++        self.assertTrue(os.path.exists(旧))
++        if 设置.HAS_DPAPI:
++            with open(self.配置, encoding="utf-8") as 文件:
++                self.assertNotIn("sk-old-123", 文件.read())
++
++    def test_旧多方案配置迁移保留当前方案(self):
++        旧 = self._写旧文件(
++            {
++                "current": "deepseek",
++                "profiles": {
++                    "default": {
++                        "api_key": "sk-a",
++                        "base_url": "https://a/v1",
++                        "model": "ma",
++                        "prompt": "pa",
++                    },
++                    "deepseek": {
++                        "api_key": "sk-b",
++                        "base_url": "https://b/v1",
++                        "model": "mb",
++                        "prompt": "pb",
++                    },
++                },
++            }
++        )
++        with mock.patch.object(设置, "旧配置路径们", return_value=[旧]):
++            数据 = 设置.load_profiles()
++        self.assertEqual(数据["current"], "deepseek")
++        self.assertEqual(数据["profiles"]["deepseek"]["api_key"], "sk-b")
++        self.assertEqual(self._读磁盘()["version"], 2)
++
++    def test_未配置方案不能切换(self):
++        设置.load_profiles()
++        设置.create_empty_profile("备用")
++        with self.assertRaises(Exception):
++            设置.switch_profile("备用")
++
++    def test_最后一个方案不能删(self):
++        设置.load_profiles()
++        with self.assertRaises(Exception):
++            设置.delete_profile("default")
++
++    def test_损坏配置先备份再回默认(self):
++        with open(self.配置, "w", encoding="utf-8") as 文件:
++            文件.write("{坏掉的 json")
++        数据 = 设置.load_profiles()
++        self.assertEqual(数据["current"], "default")
++        self.assertTrue(self._备份文件())
++
++    def test_保存方案不切换当前(self):
++        设置.save_profile("work", "sk", "https://x/v1", "m", "p")
++        self.assertEqual(设置.load_profiles()["current"], "default")
++
++    def test_保存当前方案不传提示词时保留原值(self):
++        设置.save_profile("work", "sk", "https://x/v1", "m", "原提示")
++        设置.switch_profile("work")
++        设置.save_config("sk", "https://x/v1", "m")
++        self.assertEqual(设置.load_config()["prompt"], "原提示")
++
++    def test_配置文件位于配置目录(self):
++        self.assertEqual(os.path.dirname(设置.配置路径()), self.临时目录.name)
++
++    @unittest.skipUnless(设置.HAS_DPAPI, "需要 Windows DPAPI")
++    def test_DPAPI加解密往返(self):
++        令牌 = 设置._保护("sk-abc-123")
++        self.assertNotIn("sk-abc-123", 令牌)
++        self.assertEqual(设置._解开(令牌), "sk-abc-123")
++
++
++if __name__ == "__main__":
++    unittest.main(verbosity=2)

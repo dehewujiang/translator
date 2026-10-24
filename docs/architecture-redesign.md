@@ -1,6 +1,6 @@
 # 翻译小助手 · 架构重设计（意图与结果）
 
-- 状态：第 1–2 步已实施，待用户按第 8 节验收
+- 状态：第 1–3 步已实施，待用户按第 8 节验收
 - 日期：2026-10-24
 - 任务级别：L2（同应用内多文件重构，可回退，无数据变更）
 - 本文范围：目标架构 + 迁移顺序 + 第 1 步的验收证据；不包含第 2–5 步的实现
@@ -62,17 +62,17 @@
 | 模块 | 只负责 | 不负责 | 允许依赖 |
 |---|---|---|---|
 | `translator_domain.py` | Intent/Result 类型、词句判断、错误分类 | 网络、文件、界面 | 无（仅标准库） |
-| `translator_core.py` | 配置读写、HTTP 调用、结果归一化、`run_intent` 入口 | 界面、排版 | domain、requests |
-| `app.py` | 触发、剪贴板、配置窗、渲染、托盘、单实例 | 判断词句、拼提示词、解析错误 | domain、core、Tk |
-| （后续）`translator_provider.py` | 供应商适配、重试、取消、流式 | 业务策略 | core 的请求结构 |
-| （后续）`translator_settings.py` | schema、原子写、凭据 | 网络、界面 | 系统凭据 |
+| `translator_core.py` | 结果归一化、`run_intent` 入口 | 配置存储、HTTP、界面 | domain、provider、settings |
+| `translator_provider.py` | OpenAI 兼容请求、SSE 流式、取消 | 配置、业务策略、界面 | domain、requests |
+| `translator_settings.py` | 路径、schema、原子写、DPAPI 加密、迁移 | 网络、界面 | 标准库 |
+| `app.py` | 触发、剪贴板、配置窗、渲染、托盘、单实例 | 判断词句、拼提示词、解析错误 | domain、core、settings、Tk |
 
 ### 3.2 依赖规则
 
-1. 依赖只能向下：`app → core → domain`。domain 不 import 任何本项目模块。
-2. 界面不 import `requests`，不拼 URL，不解析响应。
+1. 依赖只能向下：`app → core → provider/domain`；`app` 与 `core` 都可读 `settings`；`settings` 与 `domain` 不 import 本项目其他模块。
+2. 界面和 core 都不 import `requests`，不拼 URL，不解析响应。
 3. core 不 import `tkinter`，不知道“弹窗”存在。
-4. 失败只能在 domain 定义一次；core 负责把网络/协议错误翻译成 `Failure`。
+4. 失败只能在 domain 定义一次；provider 把网络/协议错误转成 `Failure`，core 收敛成 Result。
 
 ### 3.3 数据流
 
@@ -136,6 +136,8 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
 - **D6 线程模型**：第 1 步不动；第 2 步改为“请求号 + 取消事件”，新的顶掉旧的。仍是一次请求一个线程，单队列未做（见 D8）。
 - **D7 不加依赖**：测试用标准库 `unittest`；HTTP 仍用已有 `requests`。
 - **D8 用请求号代替单队列**：行为等价（只有最后一次可见），实现更小；不做线程池/队列。
+- **D9 配置放用户目录**：`%LOCALAPPDATA%\翻译小助手\config.json`，不再跟 exe/脚本走；解决打包后临时目录丢配置。
+- **D10 用 DPAPI 而不是凭据管理器**：不加新依赖、天然支持多方案；代价是换机器/换用户解不开，需要重填钥匙。
 
 ---
 
@@ -177,9 +179,9 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
 
 | 风险 | 影响 | 处理 |
 |---|---|---|
-| 配置路径在 exe 解压临时目录 | 打包后设置可能存不住 | 第 3 步一并处理；先按验收单实测一次 |
-| 密钥明文在磁盘 | 转发文件夹会带走 | 未进版本库（已查）；第 3 步移入系统凭据 |
-| 每次点击一个线程 | 连点可能旧结果覆盖新结果 | 第 2 步单队列；本步不伪装已修 |
+| 配置路径在 exe 解压临时目录 | 打包后设置可能存不住 | 第 3 步已改为 `%LOCALAPPDATA%\翻译小助手\config.json` |
+| 密钥明文在磁盘 | 转发文件夹会带走 | 第 3 步已用 DPAPI 加密；旧 `config.json`、`config.my.json` 仍是明文，待用户确认删除 |
+| 每次点击一个线程 | 连点可能旧结果覆盖新结果 | 第 2 步已用请求号 + 取消；线程仍按请求创建 |
 | 只有 Windows 实现 | 换平台要重写入口层 | 入口层已隔离，domain/core 可复用 |
 | 无 UI 自动化测试 | 渲染回归靠人工 | 第 4 步加截图对比；本步给人工验收单 |
 
@@ -194,6 +196,9 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
 5. 断网后翻译 → □ 提示网络连接失败，不是白屏或英文报错。
 6. 在输入框打一段长英文 → 点“翻译输入” → 立刻换成另一段 → 再点“翻译输入” → □ 最终只显示后一次的内容，先一次不会覆盖回来。
 7. 翻译一段较长的英文 → □ 文字边生成边出现，不是等整段完成才一次性出现。
+8. 托盘“退出”后再打开程序 → □ 方案还在，不用重填。
+9. 打开 `%LOCALAPPDATA%\翻译小助手\config.json` → □ 看不到 `sk-` 开头的明文钥匙，只有 `api_key_dpapi` 一串字符。
+10. 把程序文件夹里的旧 `config.json` 改名或移走 → 再打开程序 → □ 翻译仍正常（说明用的是新位置）。
 
 ---
 
@@ -224,4 +229,26 @@ build_intent(text) ──Intent(kind=word|text)──▶ run_intent(intent)
 
 - 没做字面意义的单队列/线程池；用请求号 + 取消事件达到“只有最后一次可见”（D8）。
 - 没做超时专项单测（断网用例覆盖 `RequestException`）。
+
+## 11. 第 3 步落地记录（2026-10-24）
+
+### 做
+
+- 新增 `translator_settings.py`：配置路径、schema 版本 2、原子写、备份、旧格式迁移、DPAPI 加解密。
+- 配置改到 `%LOCALAPPDATA%\翻译小助手\config.json`；测试可用 `TRANSLATOR_CONFIG_DIR` 指定临时目录。
+- 旧单层/多方案配置自动迁移；迁移前留 `config.json.bak-*`；损坏文件先备份再回默认。
+- 钥匙存为 `api_key_dpapi`，读写时加解密；磁盘不再出现明文。
+- `translator_core` 不再管配置；`app.py` 的配置函数改从 `translator_settings` 导入。
+
+### 验证
+
+- 单测 40 条全绿（新增 10 条 settings 测试：首次建配置、迁移、加密、备份、损坏、切换/删除、提示词保留）。
+- 真实配置演练：两个方案迁移，钥匙往返一致，明文不进新文件，旧文件哈希不变，备份 1 份。
+- 真实迁移到 `%LOCALAPPDATA%`：磁盘 `version=2`、`api_key_dpapi`、无明文；迁移后真实翻译成功。
+- `py_compile` 8 个文件通过；导入冒烟 `CORE_OK=True`。
+
+### 未做 / 待用户确认
+
+- 程序目录里的旧 `config.json` 和 `config.my.json` 仍是明文钥匙，需用户确认后删除。
+- exe 尚未重打；打包后第一次启动会迁移。
 

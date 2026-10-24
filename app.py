@@ -14,8 +14,8 @@ from tkinter import font as tkfont
 from tkinter import messagebox, simpledialog, ttk
 
 try:
-    from translator_core import (
-        run_intent,
+    from translator_core import run_intent
+    from translator_settings import (
         load_config,
         save_config,
         load_profiles,
