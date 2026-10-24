@@ -2,7 +2,7 @@
 [INPUT] 用户复制的英文剪贴板文本（Ctrl+C 复制后，轻点一下 Ctrl 触发）
 [OUTPUT] 小弹窗显示中文翻译，可一键复制译文
 [POS] 展示层/适配器：build_intent 把操作变成意图，run_intent 拿回结果，按类型渲染
-[PROTOCOL] 启动隐藏 + Ctrl 轻点(<400ms)触发 + 1200ms 防抖；请求号+取消事件（新的顶掉旧的）；流式首段回来才弹窗；关窗口=藏后台，退出才真正退出；点窗口外面立刻藏起；托盘图标常驻右下角
+[PROTOCOL] 启动隐藏 + Ctrl 轻点(<400ms)触发 + 1200ms 防抖；请求号+取消事件（新的顶掉旧的）；流式首段回来才弹窗；窗口高度按内容自适应；关窗口=藏后台，退出才真正退出；点外面立刻藏起；托盘常驻右下角
 """
 
 import socket
@@ -140,6 +140,16 @@ def _release_singleton():
     _singleton_sock = None
 
 
+def _算窗口高度(源行数, 译文行数, 行高, 屏幕高):
+    """按内容行数估算窗口高度，夹在最小高度和屏幕上限之间。"""
+    固定高 = 132
+    源高 = 24 + min(max(int(源行数), 1), 12) * 行高
+    译文高 = 24 + min(max(int(译文行数), 1), 30) * 行高
+    想要 = 固定高 + 源高 + 译文高
+    上限 = max(WIN_H, min(int(屏幕高 * 0.72), 900))
+    return max(WIN_H, min(想要, 上限))
+
+
 def _make_tray_image():
     """64x64 蓝色圆底 + 白色译字，不依赖外部图片文件。"""
     img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
@@ -165,6 +175,7 @@ class App:
         self.root = tk.Tk()
         self.root.title("英文翻译小助手")
         self.root.geometry(f"{WIN_W}x{WIN_H}")
+        self._window_h = WIN_H
         self._place_top_right()
         self.root.attributes("-topmost", True)
         self.root.option_add("*Font", FONT)
@@ -390,7 +401,22 @@ class App:
         try:
             sw = self.root.winfo_screenwidth()
             x = max(0, sw - WIN_W - 24)
-            self.root.geometry(f"{WIN_W}x{WIN_H}+{x}+48")
+            self.root.geometry(f"{WIN_W}x{self._window_h}+{x}+48")
+        except Exception:
+            pass
+
+    def _fit_window_height(self):
+        try:
+            self.root.update_idletasks()
+            行高 = tkfont.Font(font=FONT).metrics("linespace")
+            屏高 = self.root.winfo_screenheight()
+            self._window_h = _算窗口高度(
+                self._pane_lines(self.src_text),
+                self._pane_lines(self.dst_text),
+                行高,
+                屏高,
+            )
+            self._place_top_right()
         except Exception:
             pass
 
@@ -840,6 +866,7 @@ class App:
             self.dst_text.delete("1.0", "end")
             self.dst_text.insert("1.0", str(结果))
         self.popup()
+        self._fit_window_height()
         self._auto_split()
 
     def _pane_lines(self, widget):
@@ -882,6 +909,7 @@ class App:
         self.dst_text.insert("1.0", 文本 or "没有拿到翻译结果")
         # 先弹出来再分：藏着时量不到高，自动分会被跳过
         self.popup()
+        self._fit_window_height()
         self._auto_split()
 
     def _show_failure(self, 失败):

@@ -1,58 +1,38 @@
 {
-  "task": "架构重设计第 3 步：配置迁移、原子写、密钥加密",
+  "task": "架构重设计第 4 步（轻量版）：窗口高度按内容自适应",
   "level": "L2",
   "date": "2026-10-24",
-  "base_commit": "046f0d0",
+  "base_commit": "05b6ffc",
   "changed_files": [
-    {
-      "path": "translator_settings.py",
-      "change": "added",
-      "note": "路径、schema v2、原子写、备份、旧配置迁移、DPAPI 加解密"
-    },
-    {
-      "path": "translator_core.py",
-      "change": "modified",
-      "note": "移除配置代码，改为 import settings；只保留 _call_api/词典/翻译/run_intent"
-    },
     {
       "path": "app.py",
       "change": "modified",
-      "note": "配置函数改从 translator_settings 导入"
+      "note": "新增 _算窗口高度 / _fit_window_height；结果出来后按行数调整窗口高度，保留现有布局"
     },
     {
-      "path": "tests/test_settings.py",
+      "path": "tests/test_layout.py",
       "change": "added",
-      "note": "10 条：首次建配置、迁移、加密、备份、损坏、切换/删除、提示词保留"
+      "note": "5 条纯计算测试：短内容、长内容、超长上限、小屏下限、零行"
     },
     {
       "path": "docs/architecture-redesign.md",
       "change": "modified",
-      "note": "模块边界、D9/D10、第 3 步记录、验收 8–10"
-    },
-    {
-      "path": "AGENTS.md",
-      "change": "modified",
-      "note": "补 translator_settings 与依赖方向"
+      "note": "第 4 步记录、状态、验收 11–12、风险表"
     },
     {
       "path": "使用说明.txt",
       "change": "modified",
-      "note": "说明配置在用户目录、钥匙加密、旧 config.json 建议删"
+      "note": "说明窗口高度会自适应"
     },
     {
       "path": "evidence/test.log",
       "change": "updated",
-      "note": "第 3 步红/绿/终验"
+      "note": "第 4 步红/绿/终验"
     },
     {
-      "path": "evidence/live-smoke-step3.log",
+      "path": "evidence/diff-step4.patch",
       "change": "added",
-      "note": "迁移后真实翻译冒烟，只记录类型与长度"
-    },
-    {
-      "path": "evidence/diff-step3.patch",
-      "change": "added",
-      "note": "第 3 步逐行差异"
+      "note": "第 4 步逐行差异"
     },
     {
       "path": "evidence/run.json",
@@ -70,70 +50,43 @@
       "cmd": "python -m unittest discover -s tests -v",
       "phase": "RED",
       "exit": 1,
-      "result": "ModuleNotFoundError: translator_settings"
+      "result": "AttributeError: module 'app' has no attribute '_算窗口高度'"
     },
     {
       "cmd": "python -m unittest discover -s tests -v",
       "phase": "GREEN",
       "exit": 0,
-      "result": "40 tests OK"
+      "result": "45 tests OK"
     },
     {
       "cmd": "python -m unittest discover -s tests -v",
       "phase": "FINAL",
       "exit": 0,
-      "result": "40 tests OK"
+      "result": "45 tests OK"
     },
     {
-      "cmd": "python -m py_compile app.py translator_core.py translator_domain.py translator_provider.py translator_settings.py tests/test_domain.py tests/test_provider.py tests/test_settings.py",
+      "cmd": "python -m py_compile app.py translator_core.py translator_domain.py translator_provider.py translator_settings.py tests/test_domain.py tests/test_provider.py tests/test_settings.py tests/test_layout.py",
       "phase": "FINAL",
       "exit": 0,
       "result": "no syntax errors"
     },
     {
-      "cmd": "python -c \"... 临时目录 + 真实旧配置 migrate dry-run ...\"",
-      "phase": "DRYRUN",
-      "exit": 0,
-      "result": "profiles=2, current=deepseek, key_roundtrip=True, plaintext_absent=True, old_unchanged=True, backup_count=1, dpapi_fields=2"
-    },
-    {
-      "cmd": "python -c \"... translator_settings.load_profiles() 真实迁移 ...\"",
-      "phase": "MIGRATE",
-      "exit": 0,
-      "result": "path=%LOCALAPPDATA%\\翻译小助手\\config.json, version=2, disk_plain=False, disk_dpapi=True, backups=1"
-    },
-    {
-      "cmd": "python -c \"... run_intent(Intent('text', 'Hello there')) ...\"",
-      "phase": "LIVE",
-      "exit": 0,
-      "result": "result_type=Translation, chars=3"
-    },
-    {
-      "cmd": "python -c \"import app, translator_core, translator_provider, translator_settings; print(...)\"",
+      "cmd": "python -c \"import app; print(app._算窗口高度(...))\"",
       "phase": "FINAL",
       "exit": 0,
-      "result": "CORE_OK=True; config_path=%LOCALAPPDATA%\\翻译小助手\\config.json"
+      "result": "CORE_OK=True; WIN_H=410; h_short=410; h_long=740"
     }
   ],
   "tests": {
-    "total": 40,
-    "passed": 40,
+    "total": 45,
+    "passed": 45,
     "failed": 0,
-    "network_used_in_tests": false,
-    "live_smoke": true
-  },
-  "data_migration": {
-    "from": "D:\\10_project\\translator\\config.json",
-    "to": "%LOCALAPPDATA%\\翻译小助手\\config.json",
-    "backup": "config.json.bak-* 于新目录",
-    "old_file": "保留未改动（仍是明文）",
-    "keys": "磁盘仅 api_key_dpapi，DPAPI 当前用户加密"
+    "network_used_in_tests": false
   },
   "not_done": [
-    "删除旧 config.json 与 config.my.json（需用户确认）",
-    "第 4 步：结果卡片/自适应布局",
-    "第 5 步：重打 exe",
-    "UI 人工验收（文档第 8 节 8–10 条）"
+    "完整卡片式界面（无边框、原文折叠、悬停复制）",
+    "短词/长段/长词典的实际观感人工验收",
+    "第 5 步：重打 exe"
   ],
-  "verification_gaps": "DPAPI 只验证了当前 Windows 用户；换机器/换用户会解不开，需要重填钥匙。旧明文文件仍存在，未自动删除。"
+  "verification_gaps": "只验证了高度计算；真实字体下的显示行数与观感需要人工按文档第 8 节第 11、12 条确认"
 }
