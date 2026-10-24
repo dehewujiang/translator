@@ -1,0 +1,111 @@
+{
+  "task": "架构重设计第 1 步：把意图与结果从界面抽出",
+  "level": "L2",
+  "date": "2026-10-24",
+  "started_at": "2026-10-24T13:13:48+08:00",
+  "finished_at": "2026-10-24T13:18:30+08:00",
+  "checkpoint": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\opencode\\translator-checkpoint-20261024-131348",
+  "before_snapshot": [
+    "evidence/before/app.py",
+    "evidence/before/translator_core.py"
+  ],
+  "changed_files": [
+    {
+      "path": "translator_domain.py",
+      "change": "added",
+      "note": "Intent/Translation/Definition/Failure + 词句判定 + 失败分类"
+    },
+    {
+      "path": "translator_core.py",
+      "change": "modified",
+      "note": "_call_api 抛类型化失败；新增 run_intent；lookup_word 返回 Definition；删除重复的 is_single_word"
+    },
+    {
+      "path": "app.py",
+      "change": "modified",
+      "note": "统一走 build_intent/run_intent；按 Result 类型渲染；删除字符串嗅探与双 worker"
+    },
+    {
+      "path": "tests/__init__.py",
+      "change": "added",
+      "note": ""
+    },
+    {
+      "path": "tests/test_domain.py",
+      "change": "added",
+      "note": "20 条单测，不联网"
+    },
+    {
+      "path": "docs/architecture-redesign.md",
+      "change": "added",
+      "note": "目标架构、契约、迁移顺序、验收单"
+    },
+    {
+      "path": "evidence/test.log",
+      "change": "updated",
+      "note": "红/绿/终验输出"
+    },
+    {
+      "path": "evidence/diff.patch",
+      "change": "added",
+      "note": "改动前快照与当前文件的逐行差异"
+    },
+    {
+      "path": "evidence/run.json",
+      "change": "updated",
+      "note": ""
+    },
+    {
+      "path": "evidence/summary.md",
+      "change": "updated",
+      "note": ""
+    }
+  ],
+  "commands": [
+    {
+      "cmd": "python -m unittest discover -s tests -v",
+      "phase": "RED",
+      "exit": 1,
+      "result": "ModuleNotFoundError: translator_domain"
+    },
+    {
+      "cmd": "python -m unittest discover -s tests -v",
+      "phase": "GREEN",
+      "exit": 0,
+      "result": "20 tests OK"
+    },
+    {
+      "cmd": "python -m unittest discover -s tests -v",
+      "phase": "FINAL",
+      "exit": 0,
+      "result": "20 tests OK"
+    },
+    {
+      "cmd": "python -m py_compile app.py translator_core.py translator_domain.py tests/test_domain.py",
+      "phase": "FINAL",
+      "exit": 0,
+      "result": "no syntax errors"
+    },
+    {
+      "cmd": "python -c \"import app, translator_core, translator_domain; print(...)\"",
+      "phase": "FINAL",
+      "exit": 0,
+      "result": "CORE_OK=True; word/text routing OK; is_single_word 只有一份实现"
+    }
+  ],
+  "tests": {
+    "total": 20,
+    "passed": 20,
+    "failed": 0,
+    "network_used": false
+  },
+  "not_done": [
+    "线程模型（单队列/取消）",
+    "供应商适配与流式",
+    "配置 schema/原子写/系统凭据",
+    "结果卡片与自适应布局",
+    "重打 exe",
+    "UI 人工验收"
+  ],
+  "verification_gaps": "界面渲染只做了导入冒烟，真实弹窗需按 docs/architecture-redesign.md 第 8 节人工过一遍"
+}

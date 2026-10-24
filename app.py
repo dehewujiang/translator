@@ -1,8 +1,8 @@
 """翻译小弹窗 app.py
 [INPUT] 用户复制的英文剪贴板文本（Ctrl+C 复制后，轻点一下 Ctrl 触发）
 [OUTPUT] 小弹窗显示中文翻译，可一键复制译文
-[POS] 前端弹窗层：调用 translator_core.translate_en_to_zh，不做翻译逻辑
-[PROTOCOL] 启动隐藏 + Ctrl 轻点(<400ms)触发 + 800ms 防抖；翻译放线程，译好才弹窗；关窗口=藏后台，退出按钮才真正退出；点窗口外面立刻藏起；托盘图标常驻右下角
+[POS] 展示层/适配器：build_intent 把操作变成意图，run_intent 拿回结果，按类型渲染
+[PROTOCOL] 启动隐藏 + Ctrl 轻点(<400ms)触发 + 1200ms 防抖；翻译放线程，译好才弹窗；关窗口=藏后台，退出按钮才真正退出；点窗口外面立刻藏起；托盘图标常驻右下角
 """
 
 import socket
@@ -10,13 +10,12 @@ import sys
 import threading
 import time
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import messagebox, simpledialog, ttk
 
 try:
     from translator_core import (
-        translate_en_to_zh,
-        lookup_word,
-        is_single_word,
+        run_intent,
         load_config,
         save_config,
         load_profiles,
@@ -26,12 +25,11 @@ try:
         create_empty_profile,
         is_profile_configured,
     )
+    from translator_domain import Definition, Failure, Translation, build_intent
     CORE_OK = True
     CORE_ERR = ""
 except Exception as e:  # 核心模块缺失时先不崩，等可用
-    translate_en_to_zh = None
-    lookup_word = None
-    is_single_word = None
+    run_intent = None
     load_config = None
     save_config = None
     load_profiles = None
@@ -40,6 +38,10 @@ except Exception as e:  # 核心模块缺失时先不崩，等可用
     switch_profile = None
     create_empty_profile = None
     is_profile_configured = None
+    Definition = None
+    Failure = None
+    Translation = None
+    build_intent = None
     CORE_OK = False
     CORE_ERR = str(e)
 
@@ -218,15 +220,19 @@ class App:
         )
         self._home_status()
 
-        # ---- 原文 ----
-        ttk.Label(self.root, text="原文", style="Title.TLabel").pack(anchor="w", padx=10, pady=(2, 0))
-        self.src_text = tk.Text(self.root, height=5, font=FONT, wrap="word", relief="flat", borderwidth=0, highlightthickness=1, highlightbackground="#e8e8e8", highlightcolor="#e8e8e8", background="white")
-        self.src_text.pack(fill="both", expand=True, padx=10)
-
-        # ---- 译文 ----
-        ttk.Label(self.root, text="译文", style="Title.TLabel").pack(anchor="w", padx=10, pady=(6, 0))
-        self.dst_text = tk.Text(self.root, height=5, font=FONT, wrap="word", relief="flat", borderwidth=0, highlightthickness=1, highlightbackground="#e8e8e8", highlightcolor="#e8e8e8", background="white")
-        self.dst_text.pack(fill="both", expand=True, padx=10)
+        # ---- 原文 + 译文：中间可拖分界线 ----
+        self.paned = ttk.PanedWindow(self.root, orient="vertical")
+        self.paned.pack(fill="both", expand=True, padx=10)
+        pane_src = ttk.Frame(self.paned, style="TFrame")
+        ttk.Label(pane_src, text="原文", style="Title.TLabel").pack(anchor="w", pady=(2, 0))
+        self.src_text = tk.Text(pane_src, height=5, font=FONT, wrap="word", relief="flat", borderwidth=0, highlightthickness=1, highlightbackground="#e8e8e8", highlightcolor="#e8e8e8", background="white")
+        self.src_text.pack(fill="both", expand=True)
+        pane_dst = ttk.Frame(self.paned, style="TFrame")
+        ttk.Label(pane_dst, text="译文", style="Title.TLabel").pack(anchor="w", pady=(6, 0))
+        self.dst_text = tk.Text(pane_dst, height=5, font=FONT, wrap="word", relief="flat", borderwidth=0, highlightthickness=1, highlightbackground="#e8e8e8", highlightcolor="#e8e8e8", background="white")
+        self.dst_text.pack(fill="both", expand=True)
+        self.paned.add(pane_src, weight=1)
+        self.paned.add(pane_dst, weight=1)
 
         # ---- 按钮行：只留一排翻译相关 ----
         btns1 = ttk.Frame(self.root, style="TFrame")
@@ -640,6 +646,10 @@ class App:
                 keyboard.on_press_key("ctrl", self._on_ctrl_down, suppress=False)
                 keyboard.on_release_key("ctrl", self._on_ctrl_up, suppress=False)
                 keyboard.on_press(self._on_any_key, suppress=False)
+                try:
+                    keyboard.add_hotkey("alt+q", self._hotkey_summon, suppress=False)
+                except Exception:
+                    pass
                 self.keyboard_ok = True
             except Exception:
                 self.keyboard_ok = False
@@ -648,6 +658,12 @@ class App:
             if CORE_OK:
                 self.status_var.set("正在后台，点一下窗口里的翻译剪贴板也行")
             self.root.after(800, self._poll_clip)
+
+    def _hotkey_summon(self):
+        try:
+            self.root.after(0, self.popup)
+        except Exception:
+            pass
 
     def _on_ctrl_down(self, _e):
         self._ctrl_down_t = time.time()
@@ -711,7 +727,7 @@ class App:
             self.status_var.set("剪贴板是空的，先复制一段英文")
             return
         self.last_clip = text
-        short = text.strip()[:500]
+        short = text.strip()[:500].rstrip("\n") + "\n"
         self.src_text.delete("1.0", "end")
         self.src_text.insert("1.0", short)
         self._run_translate(text.strip(), from_hotkey)
@@ -728,7 +744,7 @@ class App:
     def _run_translate(self, text, from_hotkey):
         self.dst_text.delete("1.0", "end")
         self.dst_text.insert("1.0", "翻译中，请稍等…")
-        if not CORE_OK or translate_en_to_zh is None:
+        if not CORE_OK or run_intent is None:
             self.popup()
             self.dst_text.delete("1.0", "end")
             self.dst_text.insert("1.0", "正在等待核心模块，请稍后再点一次。")
@@ -742,26 +758,19 @@ class App:
             # 手动点的就直接显示；快捷键触发的等译好再弹
             self.popup()
         self._translating = True
-        try:
-            单词 = bool(is_single_word and is_single_word(text.strip()))
-        except Exception:
-            单词 = False
-        if 单词 and lookup_word is not None:
-            t = threading.Thread(target=self._do_lookup, args=(text.strip(),), daemon=True)
-        else:
-            t = threading.Thread(target=self._do_translate, args=(text.strip(),), daemon=True)
+        意图 = build_intent(text)
+        t = threading.Thread(target=self._do_intent, args=(意图,), daemon=True)
         t.start()
 
-    def _do_lookup(self, text):
+    def _do_intent(self, 意图):
         try:
-            结果 = lookup_word(text)
-            self.root.after(0, self._show_dict, 结果)
+            结果 = run_intent(意图)
         except Exception as e:
-            原文 = str(e) or ""
-            if 原文 and ("{" in 原文 or "word" in 原文):
-                self.root.after(0, self._show_result, 原文)
-            else:
-                self.root.after(0, self._show_result, f"翻译失败：{e}")
+            结果 = Failure("unknown", f"翻译失败：{e}")
+        try:
+            self.root.after(0, self._show_result, 结果)
+        except Exception:
+            self._translating = False
 
     def _show_dict(self, 结果):
         self._translating = False
@@ -774,16 +783,16 @@ class App:
             pass
         self.dst_text.delete("1.0", "end")
         try:
-            词 = str(结果.get("word", "")).strip()
-            英音 = str(结果.get("uk", "")).strip()
-            美音 = str(结果.get("us", "")).strip()
+            词 = str(结果.word).strip()
+            英音 = str(结果.uk).strip()
+            美音 = str(结果.us).strip()
             self.dst_text.insert("end", 词 + "  ", "词")
             音标行 = " ".join(p for p in [f"英 {英音}" if 英音 else "", f"美 {美音}" if 美音 else ""] if p)
             if 音标行:
                 self.dst_text.insert("end", 音标行, "音标")
             self.dst_text.insert("end", "\n")
             序号 = 0
-            for 义项 in (结果.get("senses", []) or []):
+            for 义项 in (结果.senses or []):
                 词性 = str(义项.get("pos", "")).strip()
                 意思 = [str(m).strip() for m in (义项.get("defs", []) or []) if str(m).strip()]
                 if 词性 or 意思:
@@ -800,23 +809,64 @@ class App:
             self.dst_text.delete("1.0", "end")
             self.dst_text.insert("1.0", str(结果))
         self.popup()
+        self._auto_split()
 
-    def _do_translate(self, text):
+    def _pane_lines(self, widget):
         try:
-            result = translate_en_to_zh(text)
-        except Exception as e:
-            result = f"翻译失败：{e}"
-        try:
-            self.root.after(0, self._show_result, result)
+            got = widget.count("1.0", "end", "displaylines")
+            n = got[0] if isinstance(got, tuple) else int(got)
+            return max(1, n)
         except Exception:
-            self._translating = False
+            try:
+                return max(1, len(widget.get("1.0", "end").splitlines()))
+            except Exception:
+                return 1
 
-    def _show_result(self, result):
+    def _auto_split(self):
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        try:
+            total = self.paned.winfo_height()
+            if total < 50:
+                return
+            行高 = tkfont.Font(font=FONT).metrics("linespace")
+            题高 = tkfont.Font(font=TITLE_FONT).metrics("linespace")
+            try:
+                内容 = self.src_text.get("1.0", "end")
+            except Exception:
+                内容 = ""
+            已有空行 = 内容.endswith("\n\n")
+            输入行 = self._pane_lines(self.src_text) + (0 if 已有空行 else 1)
+            想要 = 题高 + 6 + 输入行 * 行高 + 8
+            下限 = int(total * 0.22)
+            上限 = int(total * 0.70)
+            self.paned.sashpos(0, min(上限, max(下限, 想要)))
+        except Exception:
+            pass
+
+    def _show_text(self, 文本):
         self._translating = False
         self.dst_text.delete("1.0", "end")
-        self.dst_text.insert("1.0", result or "没有拿到翻译结果")
-        # 译好了才弹出来
+        self.dst_text.insert("1.0", 文本 or "没有拿到翻译结果")
+        # 先弹出来再分：藏着时量不到高，自动分会被跳过
         self.popup()
+        self._auto_split()
+
+    def _show_failure(self, 失败):
+        原文兜底 = str(失败.raw or "").strip()
+        self._show_text(原文兜底 or 失败.message)
+
+    def _show_result(self, 结果):
+        if isinstance(结果, Failure):
+            self._show_failure(结果)
+        elif isinstance(结果, Definition):
+            self._show_dict(结果)
+        elif isinstance(结果, Translation):
+            self._show_text(结果.text)
+        else:
+            self._show_text(str(结果) if 结果 is not None else "")
 
     def on_copy(self):
         data = self.dst_text.get("1.0", "end").strip()

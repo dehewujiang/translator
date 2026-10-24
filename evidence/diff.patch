@@ -1,0 +1,569 @@
+diff --git a/evidence/before/app.py b/app.py
+index 9295d4d..3b7c607 100644
+--- a/evidence/before/app.py
++++ b/app.py
+@@ -1,8 +1,8 @@
+ """翻译小弹窗 app.py
+ [INPUT] 用户复制的英文剪贴板文本（Ctrl+C 复制后，轻点一下 Ctrl 触发）
+ [OUTPUT] 小弹窗显示中文翻译，可一键复制译文
+-[POS] 前端弹窗层：调用 translator_core.translate_en_to_zh，不做翻译逻辑
+-[PROTOCOL] 启动隐藏 + Ctrl 轻点(<400ms)触发 + 800ms 防抖；翻译放线程，译好才弹窗；关窗口=藏后台，退出按钮才真正退出；点窗口外面立刻藏起；托盘图标常驻右下角
++[POS] 展示层/适配器：build_intent 把操作变成意图，run_intent 拿回结果，按类型渲染
++[PROTOCOL] 启动隐藏 + Ctrl 轻点(<400ms)触发 + 1200ms 防抖；翻译放线程，译好才弹窗；关窗口=藏后台，退出按钮才真正退出；点窗口外面立刻藏起；托盘图标常驻右下角
+ """
+ 
+ import socket
+@@ -15,9 +15,7 @@ from tkinter import messagebox, simpledialog, ttk
+ 
+ try:
+     from translator_core import (
+-        translate_en_to_zh,
+-        lookup_word,
+-        is_single_word,
++        run_intent,
+         load_config,
+         save_config,
+         load_profiles,
+@@ -27,12 +25,11 @@ try:
+         create_empty_profile,
+         is_profile_configured,
+     )
++    from translator_domain import Definition, Failure, Translation, build_intent
+     CORE_OK = True
+     CORE_ERR = ""
+ except Exception as e:  # 核心模块缺失时先不崩，等可用
+-    translate_en_to_zh = None
+-    lookup_word = None
+-    is_single_word = None
++    run_intent = None
+     load_config = None
+     save_config = None
+     load_profiles = None
+@@ -41,6 +38,10 @@ except Exception as e:  # 核心模块缺失时先不崩，等可用
+     switch_profile = None
+     create_empty_profile = None
+     is_profile_configured = None
++    Definition = None
++    Failure = None
++    Translation = None
++    build_intent = None
+     CORE_OK = False
+     CORE_ERR = str(e)
+ 
+@@ -743,7 +744,7 @@ class App:
+     def _run_translate(self, text, from_hotkey):
+         self.dst_text.delete("1.0", "end")
+         self.dst_text.insert("1.0", "翻译中，请稍等…")
+-        if not CORE_OK or translate_en_to_zh is None:
++        if not CORE_OK or run_intent is None:
+             self.popup()
+             self.dst_text.delete("1.0", "end")
+             self.dst_text.insert("1.0", "正在等待核心模块，请稍后再点一次。")
+@@ -757,26 +758,19 @@ class App:
+             # 手动点的就直接显示；快捷键触发的等译好再弹
+             self.popup()
+         self._translating = True
+-        try:
+-            单词 = bool(is_single_word and is_single_word(text.strip()))
+-        except Exception:
+-            单词 = False
+-        if 单词 and lookup_word is not None:
+-            t = threading.Thread(target=self._do_lookup, args=(text.strip(),), daemon=True)
+-        else:
+-            t = threading.Thread(target=self._do_translate, args=(text.strip(),), daemon=True)
++        意图 = build_intent(text)
++        t = threading.Thread(target=self._do_intent, args=(意图,), daemon=True)
+         t.start()
+ 
+-    def _do_lookup(self, text):
++    def _do_intent(self, 意图):
+         try:
+-            结果 = lookup_word(text)
+-            self.root.after(0, self._show_dict, 结果)
++            结果 = run_intent(意图)
+         except Exception as e:
+-            原文 = str(e) or ""
+-            if 原文 and ("{" in 原文 or "word" in 原文):
+-                self.root.after(0, self._show_result, 原文)
+-            else:
+-                self.root.after(0, self._show_result, f"翻译失败：{e}")
++            结果 = Failure("unknown", f"翻译失败：{e}")
++        try:
++            self.root.after(0, self._show_result, 结果)
++        except Exception:
++            self._translating = False
+ 
+     def _show_dict(self, 结果):
+         self._translating = False
+@@ -789,16 +783,16 @@ class App:
+             pass
+         self.dst_text.delete("1.0", "end")
+         try:
+-            词 = str(结果.get("word", "")).strip()
+-            英音 = str(结果.get("uk", "")).strip()
+-            美音 = str(结果.get("us", "")).strip()
++            词 = str(结果.word).strip()
++            英音 = str(结果.uk).strip()
++            美音 = str(结果.us).strip()
+             self.dst_text.insert("end", 词 + "  ", "词")
+             音标行 = " ".join(p for p in [f"英 {英音}" if 英音 else "", f"美 {美音}" if 美音 else ""] if p)
+             if 音标行:
+                 self.dst_text.insert("end", 音标行, "音标")
+             self.dst_text.insert("end", "\n")
+             序号 = 0
+-            for 义项 in (结果.get("senses", []) or []):
++            for 义项 in (结果.senses or []):
+                 词性 = str(义项.get("pos", "")).strip()
+                 意思 = [str(m).strip() for m in (义项.get("defs", []) or []) if str(m).strip()]
+                 if 词性 or 意思:
+@@ -817,16 +811,6 @@ class App:
+         self.popup()
+         self._auto_split()
+ 
+-    def _do_translate(self, text):
+-        try:
+-            result = translate_en_to_zh(text)
+-        except Exception as e:
+-            result = f"翻译失败：{e}"
+-        try:
+-            self.root.after(0, self._show_result, result)
+-        except Exception:
+-            self._translating = False
+-
+     def _pane_lines(self, widget):
+         try:
+             got = widget.count("1.0", "end", "displaylines")
+@@ -862,14 +846,28 @@ class App:
+         except Exception:
+             pass
+ 
+-    def _show_result(self, result):
++    def _show_text(self, 文本):
+         self._translating = False
+         self.dst_text.delete("1.0", "end")
+-        self.dst_text.insert("1.0", result or "没有拿到翻译结果")
++        self.dst_text.insert("1.0", 文本 or "没有拿到翻译结果")
+         # 先弹出来再分：藏着时量不到高，自动分会被跳过
+         self.popup()
+         self._auto_split()
+ 
++    def _show_failure(self, 失败):
++        原文兜底 = str(失败.raw or "").strip()
++        self._show_text(原文兜底 or 失败.message)
++
++    def _show_result(self, 结果):
++        if isinstance(结果, Failure):
++            self._show_failure(结果)
++        elif isinstance(结果, Definition):
++            self._show_dict(结果)
++        elif isinstance(结果, Translation):
++            self._show_text(结果.text)
++        else:
++            self._show_text(str(结果) if 结果 is not None else "")
++
+     def on_copy(self):
+         data = self.dst_text.get("1.0", "end").strip()
+         if not data:
+diff --git a/evidence/before/translator_core.py b/translator_core.py
+index 730a5a0..c9db179 100644
+--- a/evidence/before/translator_core.py
++++ b/translator_core.py
+@@ -1,7 +1,7 @@
+ """翻译核心：英文到中文的后端单元。
+ [INPUT] 英文文本 + config.json 当前方案（api_key / base_url / model / prompt）。
+-[OUTPUT] 中文译文字符串；配置读写走当前方案，多方案存 profiles 下。
+-[POS] 被 app.py 导入使用，提供 load_config、save_config、translate_en_to_zh 及多方案管理函数。
++[OUTPUT] 译文 / 词典 / 类型化 Failure；界面只经 run_intent 进入。
++[POS] 能力层：被 app.py 使用；向上不认识界面，向下依赖 translator_domain。
+ [PROTOCOL] 兼容 OpenAI 的聊天接口 POST {base_url}/chat/completions；老版单层 config.json 自动迁移。
+ """
+ 
+@@ -10,6 +10,21 @@ import os
+ 
+ import requests
+ 
++from translator_domain import (
++    CONFIG,
++    EMPTY,
++    NETWORK,
++    PARSE,
++    WORD,
++    Definition,
++    Failure,
++    Intent,
++    Translation,
++    failure_for_status,
++    classify_exception,
++    is_single_word,
++)
++
+ 默认提示词 = "你是翻译，只返回中文译文，代码和路径不要翻译，保持原样。"
+ 默认接口地址 = "https://opencode.ai/inference/openai/v1"
+ 默认模型 = "deepseek-v4.1-flash"
+@@ -222,7 +237,7 @@ def _call_api(系统提示, 用户内容):
+     接口地址 = _整理接口地址(配置.get("base_url", 默认接口地址))
+     模型 = str(配置.get("model", 默认模型)).strip() or 默认模型
+     if 密钥 == "":
+-        raise Exception("还没有设置密钥，请先打开配置填好密钥再翻译。")
++        raise Failure(CONFIG, "还没有设置密钥，请先打开配置填好密钥再翻译。")
+     网址 = 接口地址 + "/chat/completions"
+     请求头 = {
+         "Authorization": "Bearer " + 密钥,
+@@ -238,18 +253,14 @@ def _call_api(系统提示, 用户内容):
+     try:
+         回应 = requests.post(网址, headers=请求头, json=请求体, timeout=30)
+     except requests.RequestException:
+-        raise Exception("网络连接失败，请检查网络后重试。")
+-    if 回应.status_code == 401:
+-        raise Exception("密钥无效或已过期（401），请检查密钥是否正确。")
+-    if 回应.status_code == 404:
+-        raise Exception("接口地址或模型不对（404），请检查地址和模型是否正确。")
++        raise Failure(NETWORK, "网络连接失败，请检查网络后重试。", True)
+     if 回应.status_code != 200:
+-        raise Exception("翻译失败（错误码 " + str(回应.status_code) + "），请稍后重试。")
++        raise failure_for_status(回应.status_code)
+     try:
+         数据 = 回应.json()
+         内容 = 数据["choices"][0]["message"]["content"]
+     except (ValueError, KeyError, IndexError, TypeError):
+-        raise Exception("翻译结果解析失败，请稍后重试。")
++        raise Failure(PARSE, "翻译结果解析失败，请稍后重试。")
+     if 内容 is None:
+         return ""
+     return str(内容).strip()
+@@ -265,11 +276,11 @@ def _call_api(系统提示, 用户内容):
+ )
+ 
+ 
+-def lookup_word(word):
+-    """查单词：返回词典 dict，含 word/uk/us/senses。模型不听话时抛原文，界面直接显示原文。"""
++def lookup_word(word) -> Definition:
++    """查单词：返回词典对象。模型不听话时抛 PARSE 失败，原文放 raw 里备查。"""
+     原文 = str(word or "").strip()
+     if not 原文:
+-        return {"word": "", "uk": "", "us": "", "senses": [], "_raw": ""}
++        return Definition()
+     内容 = _call_api(单词指令, 原文)
+     文本 = 内容.strip()
+     if 文本.startswith("```"):
+@@ -281,21 +292,17 @@ def lookup_word(word):
+     try:
+         结果 = json.loads(文本)
+     except ValueError:
+-        raise Exception(内容)
+-    if not isinstance(结果, dict) or not 结果.get("senses"):
+-        raise Exception(内容)
+-    return 结果
+-
+-
+-def is_single_word(text):
+-    """是不是单个英文单词：只含字母连字符撇号且中间没空格，句子走翻译，单词走词典。"""
+-    片段 = str(text or "").strip().strip(".,!?;:\"'()[]")
+-    if not 片段 or " " in 片段 or "\n" in 片段:
+-        return False
+-    for 字 in 片段:
+-        if not (字.isalpha() and ord(字) < 128 or 字 in "-'"):
+-            return False
+-    return 2 <= len(片段) <= 30
++        raise Failure(PARSE, "模型没有按词典格式返回。", raw=内容)
++    义项 = 结果.get("senses") if isinstance(结果, dict) else None
++    if not isinstance(义项, list) or not 义项:
++        raise Failure(PARSE, "模型没有按词典格式返回。", raw=内容)
++    return Definition(
++        word=str(结果.get("word", "")).strip() or 原文,
++        uk=str(结果.get("uk", "")).strip(),
++        us=str(结果.get("us", "")).strip(),
++        senses=义项,
++        raw=内容,
++    )
+ 
+ 
+ def translate_en_to_zh(text):
+@@ -307,3 +314,18 @@ def translate_en_to_zh(text):
+     配置 = load_config()
+     提示词 = str(配置.get("prompt", "") or "").strip() or 默认提示词
+     return _call_api(提示词, 原文)
++
++
++def run_intent(意图: Intent):
++    """唯一入口：按意图分派，成功返回译文/词典，失败返回 Failure，不向界面抛异常。"""
++    文本 = str(getattr(意图, "text", "") or "").strip()
++    if 文本 == "":
++        return Failure(EMPTY, "没有可翻译的内容，先复制一段英文。")
++    try:
++        if getattr(意图, "kind", "") == WORD:
++            return lookup_word(文本)
++        return Translation(translate_en_to_zh(文本))
++    except Failure as 失败:
++        return 失败
++    except Exception as 错误:
++        return classify_exception(错误)
+diff --git a/translator_domain.py b/translator_domain.py
+new file mode 100644
+index 0000000..c78455c
+--- /dev/null
++++ b/translator_domain.py
+@@ -0,0 +1,104 @@
++"""意图与结果的契约层：只回答“要做什么”和“做出来是什么”。
++
++[INPUT] 纯文本（来自剪贴板/输入框）；HTTP 状态码（来自 translator_core）。
++[OUTPUT] Intent / Translation / Definition / Failure 四种数据结构。
++[POS] 最底层；被 translator_core 与 app.py 依赖；不 import 本项目任何模块。
++[PROTOCOL] Intent.kind 只有 "word" | "text"；Failure.kind 见 4.3 分类表。
++"""
++
++from dataclasses import dataclass, field
++from typing import Any
++
++WORD = "word"
++TEXT = "text"
++
++# 失败分类：界面按这个决定给什么提示，不解析错误文字
++CONFIG = "config"
++AUTH = "auth"
++ENDPOINT = "endpoint"
++RATE_LIMIT = "rate_limit"
++SERVER = "server"
++NETWORK = "network"
++PARSE = "parse"
++EMPTY = "empty"
++UNKNOWN = "unknown"
++
++# 只去两头的标点，不动词中间的撇号和连字符
++_两端标点 = ".,!?;:\"'()[]"
++
++
++@dataclass
++class Intent:
++    """用户这次要什么。kind 只决定走词典还是翻译。"""
++
++    kind: str
++    text: str
++
++
++@dataclass
++class Translation:
++    """一句/一段译文。"""
++
++    text: str
++
++
++@dataclass
++class Definition:
++    """一个单词的词典结果。senses 暂保持为原始结构（见设计文档 D4）。"""
++
++    word: str = ""
++    uk: str = ""
++    us: str = ""
++    senses: list[dict[str, Any]] = field(default_factory=list)
++    raw: str = ""
++
++
++@dataclass
++class Failure(Exception):
++    """失败结果。既是返回值，也是异常：core 内部可以直接抛，边界统一收敛。"""
++
++    kind: str
++    message: str
++    retryable: bool = False
++    raw: str = ""
++
++    def __str__(self) -> str:
++        return self.message
++
++
++def is_single_word(text) -> bool:
++    """是不是单个英文单词：只含字母连字符撇号且中间没空格。"""
++    片段 = str(text or "").strip().strip(_两端标点)
++    if not 片段 or " " in 片段 or "\n" in 片段:
++        return False
++    for 字 in 片段:
++        if not (字.isalpha() and ord(字) < 128 or 字 in "-'"):
++            return False
++    return 2 <= len(片段) <= 30
++
++
++def build_intent(text) -> Intent:
++    """把原文变成意图；词句判断只在这里做一次。"""
++    原文 = str(text or "").strip()
++    return Intent(WORD if is_single_word(原文) else TEXT, 原文)
++
++
++def failure_for_status(status: int, raw: str = "") -> Failure:
++    """把 HTTP 状态码翻译成带分类的失败，界面不用再认数字。"""
++    码 = str(status)
++    if status in (401, 403):
++        return Failure(AUTH, f"密钥无效或已过期（{码}），请检查密钥是否正确。", False, raw)
++    if status == 404:
++        return Failure(ENDPOINT, "接口地址或模型不对（404），请检查地址和模型是否正确。", False, raw)
++    if status == 429:
++        return Failure(RATE_LIMIT, "请求太频繁（429），请稍后重试。", True, raw)
++    if status >= 500:
++        return Failure(SERVER, f"翻译失败（错误码 {码}），请稍后重试。", True, raw)
++    return Failure(SERVER, f"翻译失败（错误码 {码}），请稍后重试。", False, raw)
++
++
++def classify_exception(错误: BaseException) -> Failure:
++    """未分类异常统一收敛，界面只面对 Failure 一种类型。"""
++    if isinstance(错误, Failure):
++        return 错误
++    return Failure(UNKNOWN, str(错误) or "翻译失败，请稍后重试。")
+diff --git a/tests/test_domain.py b/tests/test_domain.py
+new file mode 100644
+index 0000000..45988c9
+--- /dev/null
++++ b/tests/test_domain.py
+@@ -0,0 +1,153 @@
++"""意图与结果契约的单元测试。
++
++[INPUT] 纯文本；translator_core._call_api 被替换成假函数，不联网。
++[OUTPUT] unittest 断言；覆盖词句判定、异常收敛、结果分派、失败分类。
++[POS] 守护 translator_domain 与 translator_core.run_intent 的边界契约。
++[PROTOCOL] 运行：python -m unittest discover -s tests -v
++"""
++
++import unittest
++
++import translator_core
++from translator_domain import (
++    Definition,
++    Failure,
++    Intent,
++    Translation,
++    build_intent,
++    failure_for_status,
++)
++
++
++class 词句判定测试(unittest.TestCase):
++    def test_普通单词走词典(self):
++        self.assertEqual(build_intent("king").kind, "word")
++
++    def test_两边标点会去掉(self):
++        self.assertEqual(build_intent("  hello,  ").kind, "word")
++
++    def test_句子走翻译(self):
++        self.assertEqual(build_intent("good morning").kind, "text")
++
++    def test_撇号和连字符算单词(self):
++        self.assertEqual(build_intent("don't").kind, "word")
++        self.assertEqual(build_intent("well-known").kind, "word")
++
++    def test_数字不是单词(self):
++        self.assertEqual(build_intent("123").kind, "text")
++
++    def test_中文不是单词(self):
++        self.assertEqual(build_intent("中文").kind, "text")
++
++    def test_单个字母不算单词(self):
++        self.assertEqual(build_intent("a").kind, "text")
++
++    def test_空文本保留为空(self):
++        意图 = build_intent("   ")
++        self.assertEqual(意图.kind, "text")
++        self.assertEqual(意图.text, "")
++
++
++class 失败分类测试(unittest.TestCase):
++    def test_401是密钥问题且不可重试(self):
++        失败 = failure_for_status(401)
++        self.assertEqual(失败.kind, "auth")
++        self.assertFalse(失败.retryable)
++
++    def test_404是地址或模型问题(self):
++        self.assertEqual(failure_for_status(404).kind, "endpoint")
++
++    def test_429是限流且可重试(self):
++        失败 = failure_for_status(429)
++        self.assertEqual(失败.kind, "rate_limit")
++        self.assertTrue(失败.retryable)
++
++    def test_500是服务端问题且可重试(self):
++        失败 = failure_for_status(500)
++        self.assertEqual(失败.kind, "server")
++        self.assertTrue(失败.retryable)
++
++    def test_其他状态码归服务端(self):
++        self.assertEqual(failure_for_status(418).kind, "server")
++
++
++class 结果分派测试(unittest.TestCase):
++    def setUp(self):
++        self._原接口 = translator_core._call_api
++        self._原读配置 = translator_core.load_config
++        # 不读、不改真实的 config.json
++        translator_core.load_config = lambda: {"prompt": "翻译成中文"}
++
++    def tearDown(self):
++        translator_core._call_api = self._原接口
++        translator_core.load_config = self._原读配置
++
++    def test_空文本不调接口(self):
++        调用记录 = []
++
++        def 假接口(*_args, **_kwargs):
++            调用记录.append(1)
++            return "不该被调用"
++
++        translator_core._call_api = 假接口
++        结果 = translator_core.run_intent(Intent("text", ""))
++        self.assertIsInstance(结果, Failure)
++        self.assertEqual(结果.kind, "empty")
++        self.assertEqual(调用记录, [])
++
++    def test_句子返回译文对象(self):
++        translator_core._call_api = lambda _system, _user: "你好"
++        结果 = translator_core.run_intent(Intent("text", "hello"))
++        self.assertIsInstance(结果, Translation)
++        self.assertEqual(结果.text, "你好")
++
++    def test_单词返回词典对象(self):
++        载荷 = (
++            '{"word":"king","uk":"/kɪŋ/","us":"/kɪŋ/",'
++            '"senses":[{"pos":"n.","defs":["国王"],"examples":[]}]}'
++        )
++        translator_core._call_api = lambda _system, _user: 载荷
++        结果 = translator_core.run_intent(Intent("word", "king"))
++        self.assertIsInstance(结果, Definition)
++        self.assertEqual(结果.word, "king")
++        self.assertEqual(结果.senses[0]["pos"], "n.")
++
++    def test_词典带代码围栏也能解析(self):
++        载荷 = (
++            '```json\n{"word":"king","uk":"","us":"",'
++            '"senses":[{"pos":"n.","defs":["国王"]}]}\n```'
++        )
++        translator_core._call_api = lambda _system, _user: 载荷
++        结果 = translator_core.run_intent(Intent("word", "king"))
++        self.assertIsInstance(结果, Definition)
++
++    def test_已知失败原样传递(self):
++        def 假接口(*_args, **_kwargs):
++            raise Failure(kind="network", message="网络连接失败", retryable=True)
++
++        translator_core._call_api = 假接口
++        结果 = translator_core.run_intent(Intent("text", "hello"))
++        self.assertIsInstance(结果, Failure)
++        self.assertEqual(结果.kind, "network")
++        self.assertTrue(结果.retryable)
++
++    def test_未知异常收敛成失败对象(self):
++        def 假接口(*_args, **_kwargs):
++            raise RuntimeError("炸了")
++
++        translator_core._call_api = 假接口
++        结果 = translator_core.run_intent(Intent("text", "hello"))
++        self.assertIsInstance(结果, Failure)
++        self.assertEqual(结果.kind, "unknown")
++        self.assertIn("炸了", 结果.message)
++
++    def test_词典返回格式不对时保留原文(self):
++        translator_core._call_api = lambda _system, _user: "不是 json"
++        with self.assertRaises(Failure) as 捕获:
++            translator_core.lookup_word("king")
++        self.assertEqual(捕获.exception.kind, "parse")
++        self.assertEqual(捕获.exception.raw, "不是 json")
++
++
++if __name__ == "__main__":
++    unittest.main(verbosity=2)
