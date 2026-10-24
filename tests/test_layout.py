@@ -29,6 +29,12 @@ class 窗口高度测试(unittest.TestCase):
     def test_行数为零当作一行(self):
         self.assertEqual(app._算窗口高度(0, 0, 20, 1080), app.WIN_H)
 
+    def test_原文高度等于文本加18像素(self):
+        self.assertEqual(app._算原文高度(200, 17, 19), 17 + 6 + 200 + 18)
+
+    def test_空原文至少留一行加18像素(self):
+        self.assertEqual(app._算原文高度(0, 17, 19), 17 + 6 + 19 + 18)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

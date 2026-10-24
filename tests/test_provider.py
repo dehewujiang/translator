@@ -31,7 +31,10 @@ class 假回应:
 
     def iter_lines(self, decode_unicode=False):
         for 行 in self._lines:
-            yield 行
+            if isinstance(行, bytes) and decode_unicode:
+                yield 行.decode("iso-8859-1")
+            else:
+                yield 行
 
 
 def 流式行(*片段):
@@ -89,6 +92,17 @@ class 请求测试(unittest.TestCase):
         结果 = self._发请求(假回应(lines=行), on_chunk=片段.append)
         self.assertEqual(结果, "好")
         self.assertEqual(片段, ["好"])
+
+    def test_流式UTF8中文不乱码(self):
+        行 = [
+            b'data: {"choices":[{"delta":{"content":"\xe4\xbd\xa0"}}]}',
+            b'data: {"choices":[{"delta":{"content":"\xe5\xa5\xbd"}}]}',
+            b"data: [DONE]",
+        ]
+        片段 = []
+        结果 = self._发请求(假回应(lines=行), on_chunk=片段.append)
+        self.assertEqual(结果, "你好")
+        self.assertEqual(片段, ["你", "你好"])
 
     def test_取消后不再继续读流(self):
         片段 = []

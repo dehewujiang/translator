@@ -1,0 +1,12 @@
+=== UI FIX BUILD 2026-10-24 14:03:58 ===
+build_command=python -m PyInstaller --noconfirm --clean 翻译小助手.spec
+build_exit=0
+artifact=翻译小助手.exe size=37549357 time=2026-10-24 14:03:31
+artifact=翻译小助手-上一版.exe size=37548440 time=2026-10-24 13:39:12
+toc=build\����С����\Analysis-00.toc:  ('translator_domain',
+toc=build\����С����\Analysis-00.toc:   'D:\\10_project\\translator\\translator_domain.py',
+toc=build\����С����\Analysis-00.toc:  ('translator_settings',
+toc=build\����С����\Analysis-00.toc:   'D:\\10_project\\translator\\translator_settings.py',
+toc=build\����С����\Analysis-00.toc:  ('translator_provider',
+toc=build\����С����\Analysis-00.toc:   'D:\\10_project\\translator\\translator_provider.py',
+launch=skipped (source app running, singleton port busy)

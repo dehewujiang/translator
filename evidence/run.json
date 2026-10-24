@@ -1,18 +1,58 @@
 {
-  "task": "架构重设计第 5 步：重打单文件 exe",
+  "task": "验收反馈修正：原文区间距 + 流式中文编码",
   "level": "L2",
   "date": "2026-10-24",
-  "base_commit": "6ecc40b",
+  "base_commit": "197e15f",
   "changed_files": [
+    {
+      "path": "app.py",
+      "change": "modified",
+      "note": "顶栏压成一行、方案名进标题；原文区改按 ypixels + 18px，去掉行数估算和 22% 下限"
+    },
+    {
+      "path": "translator_provider.py",
+      "change": "modified",
+      "note": "流式 iter_lines 改 decode_unicode=False，按原始字节 UTF-8 解码，修中文乱码"
+    },
+    {
+      "path": "tests/test_provider.py",
+      "change": "modified",
+      "note": "假回应模拟 requests 默认西文解码；新增 UTF-8 中文流式测试"
+    },
+    {
+      "path": "tests/test_layout.py",
+      "change": "modified",
+      "note": "新增 _算原文高度 两条：文本 + 18px、空文本至少一行"
+    },
     {
       "path": "docs/architecture-redesign.md",
       "change": "modified",
-      "note": "第 5 步记录、状态、验收 13、签名风险"
+      "note": "第 2/4 步记录补编码与间距修正；验收 14/15"
     },
     {
-      "path": "evidence/build-step5.log",
+      "path": "evidence/test.log",
+      "change": "updated",
+      "note": "UI-FIX 红/绿/终验"
+    },
+    {
+      "path": "evidence/layout-check.log",
       "change": "added",
-      "note": "构建产物、TOC、启动冒烟的机器输出"
+      "note": "真实 Tk 布局实测：文本 190px、面板 231px、空隙 18px"
+    },
+    {
+      "path": "evidence/live-smoke-ui-fix.log",
+      "change": "added",
+      "note": "真实流式请求：有中文、无乱码"
+    },
+    {
+      "path": "evidence/build-ui-fix.log",
+      "change": "added",
+      "note": "重打 exe 的构建与 TOC 输出"
+    },
+    {
+      "path": "evidence/diff-ui-fix.patch",
+      "change": "added",
+      "note": "本次修正逐行差异"
     },
     {
       "path": "evidence/run.json",
@@ -25,50 +65,75 @@
       "note": ""
     }
   ],
-  "artifacts_not_versioned": [
+  "commands": [
     {
-      "path": "dist/翻译小助手.exe",
-      "size": 37548440,
-      "time": "2026-10-24 13:39:12",
-      "note": "新版，已含第 1–4 步"
+      "cmd": "python -m unittest discover -s tests -v",
+      "phase": "RED",
+      "exit": 1,
+      "result": "48 tests, failures=1 errors=2（UTF-8 乱码测试 + _算原文高度缺失）"
     },
     {
-      "path": "dist/翻译小助手-上一版.exe",
-      "size": 37515121,
-      "time": "2026-10-24 10:07:59",
-      "note": "上一版备份"
-    }
-  ],
-  "commands": [
+      "cmd": "python -m unittest discover -s tests -v",
+      "phase": "GREEN",
+      "exit": 0,
+      "result": "48 tests OK"
+    },
+    {
+      "cmd": "python -m unittest discover -s tests -v",
+      "phase": "FINAL",
+      "exit": 0,
+      "result": "48 tests OK"
+    },
+    {
+      "cmd": "python -m py_compile app.py translator_core.py translator_domain.py translator_provider.py translator_settings.py tests/*.py",
+      "phase": "FINAL",
+      "exit": 0,
+      "result": "no syntax errors"
+    },
+    {
+      "cmd": "python -c \"... run_intent(Intent('text', ...), on_chunk=...) ...\"",
+      "phase": "LIVE",
+      "exit": 0,
+      "result": "result_type=Translation, chunks=6, chars=8, has_cjk=True, mojibake=False"
+    },
+    {
+      "cmd": "python -c \"... Tk PanedWindow 布局实测 ...\"",
+      "phase": "LAYOUT",
+      "exit": 0,
+      "result": "text_px=190, desired_pane=231, actual_pane=231, text_widget_h=208, gap_px=18"
+    },
     {
       "cmd": "python -m PyInstaller --noconfirm --clean 翻译小助手.spec",
       "phase": "BUILD",
       "exit": 0,
-      "result": "Build complete"
-    },
-    {
-      "cmd": "findstr translator_domain/translator_provider/translator_settings build\\翻译小助手\\Analysis-00.toc",
-      "phase": "VERIFY",
-      "exit": 0,
-      "result": "三个模块均在 TOC 中"
-    },
-    {
-      "cmd": "Start-Process dist\\翻译小助手.exe; sleep 4; Get-Process; Stop-Process",
-      "phase": "LAUNCH",
-      "exit": 0,
-      "result": "launch_running=2（单文件父/子进程），launch_after_kill=0"
+      "result": "Build complete; exe=37,549,357 bytes @ 2026-10-24 14:03:31"
     }
   ],
   "tests": {
-    "total": 45,
-    "passed": 45,
+    "total": 48,
+    "passed": 48,
     "failed": 0,
-    "note": "第 5 步没有改代码，沿用第 4 步结果"
+    "network_used_in_tests": false,
+    "live_smoke": true
   },
-  "not_done": [
-    "在 exe 里人工翻译一次（文档第 8 节第 13 条）",
-    "代码签名",
-    "另一台电脑上试分发"
+  "artifacts_not_versioned": [
+    {
+      "path": "dist/翻译小助手.exe",
+      "size": 37549357,
+      "time": "2026-10-24 14:03:31",
+      "note": "含本次两处修正"
+    },
+    {
+      "path": "dist/翻译小助手-上一版.exe",
+      "size": 37548440,
+      "time": "2026-10-24 13:39:12",
+      "note": "上一版备份"
+    }
   ],
-  "verification_gaps": "exe 只做了启动冒烟，没有自动在打包程序里跑一次真实翻译；DPAPI 钥匙不跨机器，换电脑需重填"
+  "not_done": [
+    "exe 启动冒烟跳过（源程序正在运行，占用单实例端口）",
+    "用户重启源程序后按验收 14/15 人工看",
+    "旧明文 config.json 与 config.my.json 仍待确认删除"
+  ],
+  "verification_gaps": "18px 已用真实 Tk 布局实测；观感仍需用户确认。exe 只验证构建与 TOC，未在新 exe 里自动翻译。"
 }

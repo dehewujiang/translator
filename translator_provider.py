@@ -61,7 +61,7 @@ def _读整段(回应):
 
 def _读流(回应, on_chunk, cancel):
     累计 = ""
-    for 原始行 in 回应.iter_lines(decode_unicode=True):
+    for 原始行 in 回应.iter_lines(decode_unicode=False):
         if cancel is not None and cancel():
             break
         if not 原始行:

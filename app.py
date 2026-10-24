@@ -140,6 +140,11 @@ def _release_singleton():
     _singleton_sock = None
 
 
+def _算原文高度(文本像素, 题高, 行高):
+    """原文区 = 标题 + 6 + 文本 + 18 像素空隙；空文本至少留一行。"""
+    return 题高 + 6 + max(int(文本像素), int(行高)) + 18
+
+
 def _算窗口高度(源行数, 译文行数, 行高, 屏幕高):
     """按内容行数估算窗口高度，夹在最小高度和屏幕上限之间。"""
     固定高 = 132
@@ -219,18 +224,14 @@ class App:
         self.settings_win = None
         self.tray_icon = None
 
-        # ---- 顶栏：左方案名 + 右配置，提示另起一行 ----
+        # ---- 顶栏：左提示 + 右配置；方案名放窗口标题 ----
         topbar = ttk.Frame(self.root, style="TFrame")
-        topbar.pack(fill="x", padx=10, pady=(8, 0))
-        self.scheme_var = tk.StringVar(value="")
-        ttk.Label(topbar, textvariable=self.scheme_var, style="Title.TLabel").pack(
+        topbar.pack(fill="x", padx=10, pady=(6, 4))
+        self.status_var = tk.StringVar(value="")
+        ttk.Label(topbar, textvariable=self.status_var, style="Status.TLabel").pack(
             side="left", fill="x", expand=True
         )
         ttk.Button(topbar, text="配置", command=self.open_settings, width=6, takefocus=False, style="Small.TButton").pack(side="right")
-        self.status_var = tk.StringVar(value="")
-        ttk.Label(self.root, textvariable=self.status_var, style="Status.TLabel").pack(
-            fill="x", padx=10, pady=(0, 4)
-        )
         self._home_status()
 
         # ---- 原文 + 译文：中间可拖分界线 ----
@@ -364,7 +365,7 @@ class App:
         except Exception:
             cur = ""
         try:
-            self.scheme_var.set(f"正在用：{cur}" if cur else "翻译小助手")
+            self.root.title(f"英文翻译小助手 · {cur}" if cur else "英文翻译小助手")
         except Exception:
             pass
         self.status_var.set("复制英文后点一下 Ctrl 就翻译")
@@ -880,6 +881,13 @@ class App:
             except Exception:
                 return 1
 
+    def _pane_pixels(self, widget, 行高):
+        try:
+            got = widget.count("1.0", "end-1c", "ypixels")
+            return int(got[0] if isinstance(got, tuple) else got)
+        except Exception:
+            return self._pane_lines(widget) * 行高
+
     def _auto_split(self):
         try:
             self.root.update_idletasks()
@@ -891,14 +899,8 @@ class App:
                 return
             行高 = tkfont.Font(font=FONT).metrics("linespace")
             题高 = tkfont.Font(font=TITLE_FONT).metrics("linespace")
-            try:
-                内容 = self.src_text.get("1.0", "end")
-            except Exception:
-                内容 = ""
-            已有空行 = 内容.endswith("\n\n")
-            输入行 = self._pane_lines(self.src_text) + (0 if 已有空行 else 1)
-            想要 = 题高 + 6 + 输入行 * 行高 + 8
-            下限 = int(total * 0.22)
+            想要 = _算原文高度(self._pane_pixels(self.src_text, 行高), 题高, 行高)
+            下限 = _算原文高度(行高, 题高, 行高)
             上限 = int(total * 0.70)
             self.paned.sashpos(0, min(上限, max(下限, 想要)))
         except Exception:
