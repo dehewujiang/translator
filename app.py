@@ -12,7 +12,7 @@ import threading
 import time
 import tkinter as tk
 from tkinter import font as tkfont
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import messagebox, ttk
 
 try:
     from translator_core import run_intent
@@ -59,38 +59,20 @@ except Exception:
     HAS_KEYBOARD = False
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
-    HAS_PIL = True
-except Exception:
-    HAS_PIL = False
-
-try:
     import pystray
     HAS_PYSTRAY = True
 except Exception:
     HAS_PYSTRAY = False
 
-HAS_TRAY = HAS_PYSTRAY and HAS_PIL
+from translator_theme import (
+    FONT, SRC_FONT, TITLE_FONT, WORD_FONT, PHON_FONT, POS_FONT,
+    MAIN_FG, SUB_FG, FAINT_FG, LINE, CARD_BORDER, ROOT_BG, CARD_BG,
+    ACCENT, ACCENT_HOVER, HAS_PIL, _Tip, _make_tray_image, _按钮,
+)
+from translator_layout import WIN_W, WIN_H, _算原文高度, _算窗口高度
+from translator_settings_window import SettingsWindowMixin
 
-FONT = ("微软雅黑", 11)
-SRC_FONT = ("微软雅黑", 10)
-TITLE_FONT = ("微软雅黑", 10)
-WORD_FONT = ("微软雅黑", 13, "bold")
-PHON_FONT = ("微软雅黑", 10)
-POS_FONT = ("微软雅黑", 10, "bold")
-MAIN_FG = "#1B1B1B"
-SUB_FG = "#616161"
-FAINT_FG = "#8A8A8A"
-LINE = "#EDEBE9"
-CARD_BORDER = "#E1E1E1"
-ROOT_BG = "#F3F3F3"
-CARD_BG = "#FFFFFF"
-ACCENT = "#0078D4"
-ACCENT_HOVER = "#106EBE"
-ACCENT_PRESS = "#005A9E"
-DARK_BTN = ACCENT
-HINT_FG = "#616161"
-WIN_W, WIN_H = 380, 360
+HAS_TRAY = HAS_PYSTRAY and HAS_PIL
 DEBOUNCE_MS = 1200
 TAP_MAX_MS = 400
 SINGLETON_HOST = "127.0.0.1"
@@ -162,137 +144,7 @@ def _release_singleton():
     _singleton_sock = None
 
 
-def _按钮(父, 文本, 命令, 主=False, 链接=False):
-    if 链接:
-        return tk.Button(
-            父,
-            text=文本,
-            command=命令,
-            relief="flat",
-            bd=0,
-            bg="#ffffff",
-            fg="#616161",
-            activebackground="#F3F3F3",
-            activeforeground="#1B1B1B",
-            font=("微软雅黑", 10),
-            cursor="hand2",
-            padx=6,
-            pady=0,
-            takefocus=0,
-        )
-    if 主:
-        return tk.Button(
-            父,
-            text=文本,
-            command=命令,
-            relief="flat",
-            bd=0,
-            bg=ACCENT,
-            fg="#ffffff",
-            activebackground=ACCENT_HOVER,
-            activeforeground="#ffffff",
-            font=("微软雅黑", 11),
-            cursor="hand2",
-            padx=10,
-            pady=6,
-            takefocus=0,
-        )
-    return tk.Button(
-        父,
-        text=文本,
-        command=命令,
-        relief="flat",
-        bd=0,
-        bg="#E8EAED",
-        fg="#333333",
-        activebackground="#D8DBDF",
-        activeforeground="#111111",
-        font=("微软雅黑", 10),
-        cursor="hand2",
-        padx=10,
-        pady=4,
-        takefocus=0,
-    )
-
-
-def _算原文高度(文本像素, 题高, 行高):
-    """原文区 = 标题 + 6 + 文本 + 18 像素空隙；空文本至少留一行。"""
-    return 题高 + 6 + max(int(文本像素), int(行高)) + 18
-
-
-def _算窗口高度(源行数, 译文行数, 行高, 屏幕高):
-    """按内容行数估算窗口高度，夹在最小高度和屏幕上限之间。"""
-    固定高 = 132
-    源高 = 24 + min(max(int(源行数), 1), 12) * 行高
-    译文高 = 24 + min(max(int(译文行数), 1), 30) * 行高
-    想要 = 固定高 + 源高 + 译文高
-    上限 = max(WIN_H, min(int(屏幕高 * 0.72), 900))
-    return max(WIN_H, min(想要, 上限))
-
-
-def _make_tray_image():
-    """64x64 蓝色圆底 + 白色译字，不依赖外部图片文件。"""
-    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    d.ellipse([2, 2, 61, 61], fill=(30, 120, 255, 255))
-    try:
-        # 中文用微软雅黑，找不到就用默认字体
-        font = ImageFont.truetype("msyh.ttc", 30)
-    except Exception:
-        try:
-            font = ImageFont.load_default()
-        except Exception:
-            font = None
-    try:
-        d.text((32, 33), "译", fill="white", anchor="mm", font=font)
-    except Exception:
-        d.text((22, 18), "译", fill="white", font=font)
-    return img
-
-
-class _Tip:
-    """跟鼠标的小提示：图标旁边浮一句，移开或 1.5 秒后就没。"""
-    def __init__(self, 根):
-        self._根 = 根
-        self._窗 = None
-        self._after = None
-
-    def show(self, 文本, x, y):
-        self.hide()
-        try:
-            w = tk.Toplevel(self._根)
-            w.overrideredirect(True)
-            w.attributes("-topmost", True)
-            tk.Label(
-                w, text=文本, font=("微软雅黑", 9),
-                foreground="#323130", background="#FFFFFF",
-                relief="solid", borderwidth=1, padx=6, pady=2,
-            ).pack()
-            w.geometry(f"+{int(x) + 14}+{int(y) + 12}")
-            self._窗 = w
-            self._after = self._根.after(1500, self.hide)
-        except Exception:
-            self._窗 = None
-
-    def hide(self):
-        try:
-            if self._after is not None:
-                try:
-                    self._根.after_cancel(self._after)
-                except Exception:
-                    pass
-                self._after = None
-        except Exception:
-            pass
-        窗, self._窗 = self._窗, None
-        try:
-            if 窗 is not None:
-                窗.destroy()
-        except Exception:
-            pass
-
-
-class App:
+class App(SettingsWindowMixin):
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("英文翻译小助手")
@@ -869,223 +721,6 @@ class App:
             self._place_top_right()
             self._raise_no_activate()
         self._start_outside_watch()
-
-    # ---------- 配置小窗（左列表 + 右详情） ----------
-    def open_settings(self):
-        if self.settings_win is not None and self.settings_win.winfo_exists():
-            try:
-                self.settings_win.lift()
-                self.settings_win.focus_force()
-            except Exception:
-                pass
-            return
-        if load_profiles is None:
-            self._say_transient("核心模块还没准备好，稍后再打开配置")
-            return
-        win = tk.Toplevel(self.root)
-        self.settings_win = win
-        win.title("配置")
-        win.geometry("620x480")
-        win.attributes("-topmost", True)
-        win.option_add("*Font", FONT)
-        self._refreshing_list = False
-        self._prof_names = []
-
-        left = ttk.Frame(win, width=180)
-        left.pack(side="left", fill="y", padx=(10, 4), pady=10)
-        try:
-            left.pack_propagate(False)
-        except Exception:
-            pass
-        ttk.Label(left, text="方案（点一下就换）", style="Title.TLabel").pack(anchor="w")
-        self.prof_list = tk.Listbox(left, font=FONT, exportselection=False)
-        self.prof_list.pack(fill="both", expand=True, pady=(4, 6))
-        self.prof_list.bind("<<ListboxSelect>>", lambda _e: self._on_profile_selected())
-        ttk.Button(left, text="+ 新方案", command=self._settings_add).pack(fill="x")
-
-        right = ttk.Frame(win)
-        right.pack(side="left", fill="both", expand=True, padx=(4, 8), pady=8)
-
-        ttk.Label(right, text="地址").pack(anchor="w")
-        self.s_url_var = tk.StringVar()
-        ttk.Entry(right, textvariable=self.s_url_var).pack(fill="x")
-        ttk.Label(right, text="如 https://api.deepseek.com/v1", foreground="gray").pack(anchor="w")
-
-        ttk.Label(right, text="钥匙").pack(anchor="w", pady=(6, 0))
-        self.s_key_var = tk.StringVar()
-        ttk.Entry(right, textvariable=self.s_key_var, show="*").pack(fill="x")
-        ttk.Label(right, text="去官网申请，粘贴到这里", foreground="gray").pack(anchor="w")
-
-        ttk.Label(right, text="模型").pack(anchor="w", pady=(6, 0))
-        self.s_model_var = tk.StringVar()
-        ttk.Entry(right, textvariable=self.s_model_var).pack(fill="x")
-        ttk.Label(right, text="如 deepseek-flash，照文档抄", foreground="gray").pack(anchor="w")
-
-        ttk.Label(right, text="翻译要求（想让它怎么翻就怎么写）").pack(anchor="w", pady=(6, 0))
-        self.s_prompt_text = tk.Text(right, height=5, font=FONT, wrap="word")
-        self.s_prompt_text.pack(fill="x")
-
-        self.s_hint_var = tk.StringVar(value="")
-        ttk.Label(right, textvariable=self.s_hint_var, wraplength=400).pack(
-            fill="x", pady=(4, 0)
-        )
-
-        row = ttk.Frame(right)
-        row.pack(fill="x", pady=8)
-        ttk.Button(row, text="保存", command=self._settings_save).pack(side="left", padx=2)
-        ttk.Button(row, text="删除", command=self._settings_delete).pack(side="left", padx=2)
-
-        self._refresh_settings_list()
-
-    def _selected_profile_name(self):
-        try:
-            sel = self.prof_list.curselection()
-        except Exception:
-            return ""
-        if not sel:
-            return ""
-        idx = sel[0]
-        try:
-            return self._prof_names[idx]
-        except Exception:
-            return ""
-
-    def _refresh_settings_list(self, select_name=""):
-        try:
-            data = load_profiles()
-        except Exception as e:
-            self.s_hint_var.set(f"读配置失败：{e}")
-            return
-        names = list(data["profiles"].keys())
-        cur = data.get("current", "")
-        self._refreshing_list = True
-        try:
-            self.prof_list.delete(0, "end")
-            self._prof_names = list(names)
-            pick = 0
-            for i, name in enumerate(names):
-                try:
-                    configured = is_profile_configured(name, data) if is_profile_configured else True
-                except Exception:
-                    configured = True
-                if not configured:
-                    label = f"{name} 未配置"
-                elif name == cur:
-                    label = f"{name} ✓正在用"
-                else:
-                    label = name
-                self.prof_list.insert("end", label)
-                if name == (select_name or cur):
-                    pick = i
-            if names:
-                self.prof_list.selection_clear(0, "end")
-                self.prof_list.selection_set(pick)
-                self.prof_list.see(pick)
-        finally:
-            self._refreshing_list = False
-        self._fill_settings_fields()
-
-    def _fill_settings_fields(self):
-        name = (self._selected_profile_name() or "").strip()
-        if not name:
-            return
-        try:
-            data = load_profiles()
-        except Exception:
-            return
-        prof = data["profiles"].get(name)
-        if prof is None:
-            return
-        self.s_url_var.set(prof.get("base_url", ""))
-        self.s_key_var.set(prof.get("api_key", ""))
-        self.s_model_var.set(prof.get("model", ""))
-        self.s_prompt_text.delete("1.0", "end")
-        self.s_prompt_text.insert("1.0", prof.get("prompt", ""))
-
-    def _settings_add(self):
-        try:
-            name = simpledialog.askstring("新方案", "请起个新名字，比如：备用", parent=self.settings_win)
-        except Exception:
-            name = None
-        if name is None:
-            return
-        name = (name or "").strip()
-        if not name:
-            self.s_hint_var.set("先起个名字才能新增。")
-            return
-        if create_empty_profile is None:
-            self.s_hint_var.set("核心模块还没准备好，稍后再试。")
-            return
-        try:
-            create_empty_profile(name)
-            self._refresh_settings_list(select_name=name)
-            self._fill_settings_fields()
-            self.s_hint_var.set(f"已新建：{name}，右边填好点保存，保存好才能用。现在用的还是原来的，没动。")
-        except Exception as e:
-            self.s_hint_var.set(str(e))
-
-    def _settings_save(self):
-        name = self._selected_profile_name().strip()
-        if not name:
-            self.s_hint_var.set("先在左边点一个方案再保存。")
-            return
-        url = self.s_url_var.get().strip()
-        key = self.s_key_var.get().strip()
-        model = self.s_model_var.get().strip()
-        if not url or not key or not model:
-            self.s_hint_var.set("地址钥匙模型三样都要填好才能保存，差一样都用不了。")
-            return
-        try:
-            save_profile(
-                name,
-                key,
-                url,
-                model,
-                self.s_prompt_text.get("1.0", "end").strip(),
-            )
-            switch_profile(name)
-            self._refresh_settings_list(select_name=name)
-            self._home_status()
-            self.s_hint_var.set(f"已保存并正在用：{name}。")
-        except Exception as e:
-            self.s_hint_var.set(str(e))
-
-    def _on_profile_selected(self):
-        if getattr(self, "_refreshing_list", False):
-            return
-        name = self._selected_profile_name().strip()
-        if not name:
-            return
-        try:
-            data = load_profiles()
-            configured = is_profile_configured(name, data) if is_profile_configured else True
-        except Exception:
-            configured = True
-        if not configured:
-            self._fill_settings_fields()
-            self.s_hint_var.set("这套还没填好，右边填好点保存，保存好才开始用。现在用的还是原来的。")
-            return
-        try:
-            switch_profile(name)
-            self._fill_settings_fields()
-            self._home_status()
-            self.s_hint_var.set(f"已换到：{name}，直接就能用。")
-            self._refresh_settings_list(select_name=name)
-        except Exception as e:
-            self.s_hint_var.set(str(e))
-
-    def _settings_delete(self):
-        name = self._selected_profile_name().strip()
-        if not name:
-            self.s_hint_var.set("先在左边点一个方案再删除。")
-            return
-        try:
-            cur = delete_profile(name)
-            self._refresh_settings_list(select_name=cur)
-            self.s_hint_var.set(f"已删除：{name}，现在用的是：{cur}。")
-            self._home_status()
-        except Exception as e:
-            self.s_hint_var.set(str(e))
 
     # ---------- 剪贴板 ----------
     def read_clip(self):
