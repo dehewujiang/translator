@@ -1,43 +1,43 @@
 {
-  "task": "布局改为译文优先（方案 B）",
+  "task": "译文优先布局 + 视觉收拾（无滚动条/文字链接/等宽按钮）",
   "level": "L2",
   "date": "2026-10-24",
-  "base_commit": "4cafd7b",
+  "base_commit": "2b03e24",
   "changed_files": [
     {
       "path": "app.py",
       "change": "modified",
-      "note": "译文在上、原文在下；原文默认 3 行可展开；复制移到译文标题；窗口高度由译文决定；滚动条；see(1.0)"
+      "note": "删滚动条，鼠标滚轮滚动；配置/复制/展开改文字链接；底部两按钮 uniform 等宽，主按钮蓝色"
     },
     {
       "path": "使用说明.txt",
       "change": "modified",
-      "note": "更新上下顺序、展开/收起、复制位置、输入框位置"
+      "note": "无滚动条、滚轮说明、链接位置"
     },
     {
       "path": "docs/architecture-redesign.md",
       "change": "modified",
-      "note": "第 15 节译文优先布局；验收 18–20；状态"
+      "note": "第 15 节补无滚动条/链接/等宽按钮；验收 21–22"
     },
     {
-      "path": "evidence/layout-translation-first.log",
+      "path": "evidence/layout-final.log",
       "change": "added",
-      "note": "真实 Tk 实测：译文 312/原文 93；展开 196/226；词典 55"
+      "note": "真实 Tk 实测：译文 223/原文 92；按钮 176/176；展开 97/218；词典 54"
     },
     {
-      "path": "evidence/build-translation-first.log",
+      "path": "evidence/build-style.log",
       "change": "added",
       "note": "重打 exe 的产物信息"
     },
     {
-      "path": "evidence/diff-translation-first.patch",
+      "path": "evidence/diff-style.patch",
       "change": "added",
       "note": "本次逐行差异"
     },
     {
       "path": "evidence/test.log",
       "change": "updated",
-      "note": "译文优先布局终验"
+      "note": "视觉收拾终验"
     },
     {
       "path": "evidence/run.json",
@@ -52,10 +52,10 @@
   ],
   "commands": [
     {
-      "cmd": "python -c \"... 真实 Tk 窗口 + App 方法，长原文短译文 ...\"",
+      "cmd": "python -c \"... 真实 Tk 布局 + App 方法 + 等宽按钮 ...\"",
       "phase": "LAYOUT",
       "exit": 0,
-      "result": "order=dst,src; window_h=410, dst_h=312, src_h=93; src_yview=(0.0,0.268); expanded dst=196/src=226; dict dst=350/src=55"
+      "result": "order=dst,src; window_h=410, dst_h=223, src_h=92; btn_widths=176/176; src_yview=(0.0,0.278); expanded dst=97/src=218; dict dst=261/src=54"
     },
     {
       "cmd": "python -m unittest discover -s tests -v",
@@ -73,7 +73,7 @@
       "cmd": "python -m PyInstaller --noconfirm --clean 翻译小助手.spec",
       "phase": "BUILD",
       "exit": 0,
-      "result": "Build complete; exe=37,550,736 bytes @ 2026-10-24 15:03:30"
+      "result": "Build complete; exe=37,551,699 bytes @ 2026-10-24 15:24:19"
     }
   ],
   "tests": {
@@ -85,21 +85,21 @@
   "artifacts_not_versioned": [
     {
       "path": "dist/翻译小助手.exe",
-      "size": 37550736,
-      "time": "2026-10-24 15:03:30",
-      "note": "译文优先布局"
+      "size": 37551699,
+      "time": "2026-10-24 15:24:19",
+      "note": "译文优先 + 无滚动条 + 文字链接 + 等宽按钮"
     },
     {
       "path": "dist/翻译小助手-上一版.exe",
-      "size": 37549779,
-      "time": "2026-10-24 14:30:49",
+      "size": 37550736,
+      "time": "2026-10-24 15:03:30",
       "note": "上一版备份"
     }
   ],
   "not_done": [
-    "用户重启后按验收 18–20 人工看",
+    "用户重启后按验收 18–22 人工看",
     "exe 启动冒烟跳过（源程序正在运行，占用单实例端口）",
     "旧明文 config.json 与 config.my.json 仍待确认删除"
   ],
-  "verification_gaps": "布局用真实 Tk 窗口 + App 方法实测；实际观感（字体、滚动条、展开手感）需用户确认。"
+  "verification_gaps": "布局与按钮等宽用真实 Tk 实测；实际观感（链接颜色、按钮蓝色、滚轮手感）需用户确认。"
 }

@@ -1,0 +1,6 @@
+=== STYLE BUILD 2026-10-24 15:24:32 ===
+build_command=python -m PyInstaller --noconfirm --clean 翻译小助手.spec
+build_exit=0
+artifact=翻译小助手.exe size=37551699 time=2026-10-24 15:24:19
+artifact=翻译小助手-上一版.exe size=37550736 time=2026-10-24 15:03:30
+launch=skipped (source app running, singleton port busy)

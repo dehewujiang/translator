@@ -1,0 +1,7 @@
+order= ['.!panedwindow.!frame', '.!panedwindow.!frame2']
+window_h= 410 dst_h= 223 src_h= 92
+dst_text_w= 360 src_text_w= 360
+btn_widths= 176 176
+src_yview= (0.0, 0.27751196172248804) dst_yview= (0.0, 1.0)
+expanded: dst_h= 97 src_h= 218
+dict: dst_h= 261 src_h= 54

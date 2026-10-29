@@ -1,0 +1,764 @@
+diff --git a/app.py b/app.py
+index eff8298..f4bab17 100644
+--- a/app.py
++++ b/app.py
+@@ -72,10 +72,25 @@ except Exception:
+ 
+ HAS_TRAY = HAS_PYSTRAY and HAS_PIL
+ 
+-FONT = ("微软雅黑", 10)
+-TITLE_FONT = ("微软雅黑", 9, "bold")
+-HINT_FG = "#666666"
+-WIN_W, WIN_H = 380, 410
++FONT = ("微软雅黑", 11)
++SRC_FONT = ("微软雅黑", 10)
++TITLE_FONT = ("微软雅黑", 10)
++WORD_FONT = ("微软雅黑", 13, "bold")
++PHON_FONT = ("微软雅黑", 10)
++POS_FONT = ("微软雅黑", 10, "bold")
++MAIN_FG = "#1B1B1B"
++SUB_FG = "#616161"
++FAINT_FG = "#8A8A8A"
++LINE = "#EDEBE9"
++CARD_BORDER = "#E1E1E1"
++ROOT_BG = "#F3F3F3"
++CARD_BG = "#FFFFFF"
++ACCENT = "#0078D4"
++ACCENT_HOVER = "#106EBE"
++ACCENT_PRESS = "#005A9E"
++DARK_BTN = ACCENT
++HINT_FG = "#616161"
++WIN_W, WIN_H = 380, 360
+ DEBOUNCE_MS = 1200
+ TAP_MAX_MS = 400
+ SINGLETON_HOST = "127.0.0.1"
+@@ -147,6 +162,59 @@ def _release_singleton():
+     _singleton_sock = None
+ 
+ 
++def _按钮(父, 文本, 命令, 主=False, 链接=False):
++    if 链接:
++        return tk.Button(
++            父,
++            text=文本,
++            command=命令,
++            relief="flat",
++            bd=0,
++            bg="#ffffff",
++            fg="#616161",
++            activebackground="#F3F3F3",
++            activeforeground="#1B1B1B",
++            font=("微软雅黑", 10),
++            cursor="hand2",
++            padx=6,
++            pady=0,
++            takefocus=0,
++        )
++    if 主:
++        return tk.Button(
++            父,
++            text=文本,
++            command=命令,
++            relief="flat",
++            bd=0,
++            bg=ACCENT,
++            fg="#ffffff",
++            activebackground=ACCENT_HOVER,
++            activeforeground="#ffffff",
++            font=("微软雅黑", 11),
++            cursor="hand2",
++            padx=10,
++            pady=6,
++            takefocus=0,
++        )
++    return tk.Button(
++        父,
++        text=文本,
++        command=命令,
++        relief="flat",
++        bd=0,
++        bg="#E8EAED",
++        fg="#333333",
++        activebackground="#D8DBDF",
++        activeforeground="#111111",
++        font=("微软雅黑", 10),
++        cursor="hand2",
++        padx=10,
++        pady=4,
++        takefocus=0,
++    )
++
++
+ def _算原文高度(文本像素, 题高, 行高):
+     """原文区 = 标题 + 6 + 文本 + 18 像素空隙；空文本至少留一行。"""
+     return 题高 + 6 + max(int(文本像素), int(行高)) + 18
+@@ -182,6 +250,48 @@ def _make_tray_image():
+     return img
+ 
+ 
++class _Tip:
++    """跟鼠标的小提示：图标旁边浮一句，移开或 1.5 秒后就没。"""
++    def __init__(self, 根):
++        self._根 = 根
++        self._窗 = None
++        self._after = None
++
++    def show(self, 文本, x, y):
++        self.hide()
++        try:
++            w = tk.Toplevel(self._根)
++            w.overrideredirect(True)
++            w.attributes("-topmost", True)
++            tk.Label(
++                w, text=文本, font=("微软雅黑", 9),
++                foreground="#323130", background="#FFFFFF",
++                relief="solid", borderwidth=1, padx=6, pady=2,
++            ).pack()
++            w.geometry(f"+{int(x) + 14}+{int(y) + 12}")
++            self._窗 = w
++            self._after = self._根.after(1500, self.hide)
++        except Exception:
++            self._窗 = None
++
++    def hide(self):
++        try:
++            if self._after is not None:
++                try:
++                    self._根.after_cancel(self._after)
++                except Exception:
++                    pass
++                self._after = None
++        except Exception:
++            pass
++        窗, self._窗 = self._窗, None
++        try:
++            if 窗 is not None:
++                窗.destroy()
++        except Exception:
++            pass
++
++
+ class App:
+     def __init__(self):
+         self.root = tk.Tk()
+@@ -192,7 +302,7 @@ class App:
+         self.root.attributes("-topmost", True)
+         self.root.option_add("*Font", FONT)
+         try:
+-            self.root.configure(background="#ffffff")
++            self.root.configure(background=ROOT_BG)
+         except Exception:
+             pass
+         try:
+@@ -203,14 +313,12 @@ class App:
+                     break
+                 except Exception:
+                     continue
+-            style.configure("TFrame", background="#ffffff")
+-            style.configure("TLabel", background="#ffffff")
+-            style.configure("Status.TLabel", foreground=HINT_FG, background="#ffffff")
+-            style.configure("Title.TLabel", font=TITLE_FONT, foreground="#333333", background="#ffffff")
+-            style.configure("Accent.TButton", font=("微软雅黑", 10, "bold"), padding=(5, 2), background="#ffffff", bordercolor="#e0e0e0")
+-            style.configure("Small.TButton", font=("微软雅黑", 10), padding=(5, 2), background="#ffffff", bordercolor="#e0e0e0")
+-            style.map("Small.TButton", background=[("active", "#f2f2f2"), ("pressed", "#e8e8e8")])
+-            style.map("Accent.TButton", background=[("active", "#f2f2f2"), ("pressed", "#e8e8e8")])
++            style.configure("TFrame", background=ROOT_BG)
++            style.configure("TLabel", background=ROOT_BG, foreground=SUB_FG)
++            style.configure("Card.TFrame", background=CARD_BG)
++            style.configure("Card.TLabel", background=CARD_BG, foreground=SUB_FG)
++            style.configure("Status.TLabel", foreground=SUB_FG, background=ROOT_BG)
++            style.configure("Title.TLabel", font=TITLE_FONT, foreground=FAINT_FG, background=CARD_BG)
+         except Exception:
+             pass
+         # 启动就藏到后台，不打扰
+@@ -236,94 +344,139 @@ class App:
+         self.settings_win = None
+         self.tray_icon = None
+ 
+-        # ---- 顶栏：左提示 + 右配置；方案名放窗口标题 ----
+-        topbar = ttk.Frame(self.root, style="TFrame")
+-        topbar.pack(fill="x", padx=10, pady=(6, 4))
++        # ---- 状态条平时不占地方：有字才冒出来 ----
+         self.status_var = tk.StringVar(value="")
+-        ttk.Label(topbar, textvariable=self.status_var, style="Status.TLabel").pack(
+-            side="left", fill="x", expand=True
++        self._status_after = None
++        self.status_label = tk.Label(
++            self.root,
++            textvariable=self.status_var,
++            font=("微软雅黑", 9),
++            foreground=SUB_FG,
++            background=ROOT_BG,
+         )
+-        ttk.Button(topbar, text="配置", command=self.open_settings, width=6, takefocus=False, style="Small.TButton").pack(side="right")
++        self._tip = _Tip(self.root)
+         self._home_status()
+ 
+-        # ---- 译文（上）+ 原文（下）：译文优先 ----
+-        self.paned = ttk.PanedWindow(self.root, orient="vertical")
+-        self.paned.pack(fill="both", expand=True, padx=10)
+-
+-        pane_dst = ttk.Frame(self.paned, style="TFrame")
+-        dst_head = ttk.Frame(pane_dst, style="TFrame")
+-        dst_head.pack(fill="x", pady=(2, 0))
+-        ttk.Label(dst_head, text="译文", style="Title.TLabel").pack(side="left")
+-        ttk.Button(
+-            dst_head,
+-            text="复制",
+-            command=self.on_copy,
+-            width=5,
+-            takefocus=False,
+-            style="Small.TButton",
+-        ).pack(side="right")
+-        dst_box = ttk.Frame(pane_dst, style="TFrame")
+-        dst_box.pack(fill="both", expand=True)
++        # ---- 译文（上）+ 原文（下）：译文优先，中间细线可拖动手调 ----
++        body = ttk.Frame(self.root, style="Card.TFrame")
++        body.pack(fill="both", expand=True, padx=12, pady=(12, 0))
++
++        pane_dst = ttk.Frame(body, style="Card.TFrame")
++        pane_dst.pack(fill="both", expand=True)
++        dst_head = ttk.Frame(pane_dst, style="Card.TFrame")
++        dst_head.pack(fill="x", padx=12, pady=(10, 2))
++        self.copy_btn = _按钮(dst_head, "⧉", self.on_copy, 链接=True)
++        try:
++            self.copy_btn.configure(font=("微软雅黑", 11))
++        except Exception:
++            pass
++        self.copy_btn.pack(side="right")
++        self.copy_btn.bind("<Enter>", lambda e: self._tip_show("复制译文", e))
++        self.copy_btn.bind("<Leave>", self._tip_hide)
+         self.dst_text = tk.Text(
+-            dst_box,
++            pane_dst,
+             height=5,
+             font=FONT,
+             wrap="word",
+             relief="flat",
+             borderwidth=0,
+-            highlightthickness=1,
+-            highlightbackground="#e8e8e8",
+-            highlightcolor="#e8e8e8",
+-            background="white",
+-        )
+-        dst_scroll = ttk.Scrollbar(dst_box, orient="vertical", command=self.dst_text.yview)
+-        self.dst_text.configure(yscrollcommand=dst_scroll.set)
+-        dst_scroll.pack(side="right", fill="y")
+-        self.dst_text.pack(side="left", fill="both", expand=True)
+-        self.paned.add(pane_dst, weight=1)
+-
+-        pane_src = ttk.Frame(self.paned, style="TFrame")
+-        src_head = ttk.Frame(pane_src, style="TFrame")
+-        src_head.pack(fill="x", pady=(6, 0))
+-        ttk.Label(src_head, text="原文", style="Title.TLabel").pack(side="left")
+-        self.expand_btn = ttk.Button(
+-            src_head,
+-            text="展开",
+-            command=self._toggle_source,
+-            width=5,
+-            takefocus=False,
+-            style="Small.TButton",
++            highlightthickness=0,
++            background=CARD_BG,
++            foreground=MAIN_FG,
++            spacing1=4,
++            spacing2=2,
++            spacing3=6,
++            padx=4,
++            pady=2,
+         )
++        self.dst_text.pack(fill="both", expand=True, padx=12)
++
++        # 可拖动的细分隔线：平时 1px 淡线，鼠标上去变深，拖它调两边高度
++        self.divider = tk.Frame(body, background=CARD_BG, height=9, cursor="sb_v_double_arrow")
++        self.divider.pack(fill="x")
++        self.div_line = tk.Frame(self.divider, background=LINE, height=1)
++        self.div_line.pack(fill="x", pady=4)
++        for 部件 in (self.divider, self.div_line):
++            部件.bind("<Enter>", self._div_hover_in)
++            部件.bind("<Leave>", self._div_hover_out)
++            部件.bind("<ButtonPress-1>", self._div_start)
++            部件.bind("<B1-Motion>", self._div_drag)
++        self._div_y = None
++        self._div_acc = 0.0
++
++        pane_src = ttk.Frame(body, style="Card.TFrame")
++        pane_src.pack(fill="x")
++        src_head = ttk.Frame(pane_src, style="Card.TFrame")
++        src_head.pack(fill="x", padx=12, pady=(6, 0))
++        self.expand_btn = _按钮(src_head, "▾", self._toggle_source, 链接=True)
++        try:
++            self.expand_btn.configure(font=("微软雅黑", 11))
++        except Exception:
++            pass
+         self.expand_btn.pack(side="right")
+-        src_box = ttk.Frame(pane_src, style="TFrame")
+-        src_box.pack(fill="both", expand=True)
++        self.expand_btn.bind("<Enter>", lambda e: self._tip_show(
++            "收起原文" if self._source_expanded else "展开原文", e))
++        self.expand_btn.bind("<Leave>", self._tip_hide)
+         self.src_text = tk.Text(
+-            src_box,
++            pane_src,
+             height=3,
+-            font=FONT,
++            font=SRC_FONT,
+             wrap="word",
+             relief="flat",
+             borderwidth=0,
+-            highlightthickness=1,
+-            highlightbackground="#e8e8e8",
+-            highlightcolor="#e8e8e8",
+-            background="white",
++            highlightthickness=0,
++            background=CARD_BG,
++            foreground=SUB_FG,
++            spacing1=2,
++            spacing2=2,
++            spacing3=2,
++            padx=4,
++            pady=2,
+         )
+-        src_scroll = ttk.Scrollbar(src_box, orient="vertical", command=self.src_text.yview)
+-        self.src_text.configure(yscrollcommand=src_scroll.set)
+-        src_scroll.pack(side="right", fill="y")
+-        self.src_text.pack(side="left", fill="both", expand=True)
+-        self.paned.add(pane_src, weight=1)
++        self.src_text.pack(fill="x", padx=12, pady=(0, 10))
++        self.src_text.bind("<MouseWheel>", lambda 事件: self._滚轮(self.src_text, 事件))
++        self.src_text.bind("<Return>", self._on_src_return)
++        self.dst_text.bind("<MouseWheel>", lambda 事件: self._滚轮(self.dst_text, 事件))
+ 
+-        # ---- 按钮行：两个输入入口；复制在译文标题旁 ----
++        # ---- 按钮行：蓝色主按钮 + 描边齿轮（等高，Fluent 命令栏） ----
+         btns1 = ttk.Frame(self.root, style="TFrame")
+-        btns1.pack(fill="x", padx=10, pady=(10, 10))
+-        ttk.Button(btns1, text="翻译剪贴板", command=self.on_manual, takefocus=False, style="Small.TButton").pack(side="left", padx=(0, 2))
+-        ttk.Button(btns1, text="翻译输入", command=self.on_input, style="Accent.TButton", takefocus=False).pack(side="left", padx=2)
++        btns1.pack(fill="x", padx=12, pady=(8, 12))
++        self._btns = btns1
++        btns1.columnconfigure(0, weight=1)
++        btns1.columnconfigure(1, weight=0)
++        _按钮(btns1, "翻译", self.on_manual, 主=True).grid(
++            row=0, column=0, sticky="ew", padx=(0, 8)
++        )
++        self.config_btn = tk.Button(
++            btns1,
++            text="⚙",
++            command=self.open_settings,
++            relief="flat",
++            bd=0,
++            bg=CARD_BG,
++            fg="#616161",
++            activebackground="#EDEBE9",
++            activeforeground="#1B1B1B",
++            highlightthickness=1,
++            highlightbackground=CARD_BORDER,
++            highlightcolor=CARD_BORDER,
++            font=("微软雅黑", 13),
++            cursor="hand2",
++            padx=10,
++            pady=3,
++            takefocus=0,
++        )
++        self.config_btn.grid(row=0, column=1, sticky="ns")
++        self.config_btn.bind("<Enter>", lambda e: self._tip_show("配置", e))
++        self.config_btn.bind("<Leave>", self._tip_hide)
+ 
+         if not CORE_OK:
+             self.dst_text.insert("1.0", "正在等待核心模块，请稍后再试（不要关闭）。")
+ 
++        # 初始 360 高可能装不下新字体的 chrome：启动就一次兜底，免得按钮行被挤没
++        self._ensure_fits()
++        self._place_top_right()
++
+         self._start_trigger()
+         self._start_tray()
+         self._start_singleton_server()
+@@ -365,7 +518,7 @@ class App:
+     def _start_tray(self):
+         if not HAS_TRAY:
+             self._home_status()
+-            self.status_var.set(self.status_var.get() + "（无托盘图标）")
++            self._say_transient("无托盘图标，窗口照常用")
+             return
+         try:
+             image = _make_tray_image()
+@@ -381,7 +534,7 @@ class App:
+         except Exception:
+             self.tray_icon = None
+             self._home_status()
+-            self.status_var.set(self.status_var.get() + "（无托盘图标）")
++            self._say_transient("无托盘图标，窗口照常用")
+ 
+     def _start_singleton_server(self):
+         def _serve():
+@@ -434,14 +587,83 @@ class App:
+             self.root.title(f"英文翻译小助手 · {cur}" if cur else "英文翻译小助手")
+         except Exception:
+             pass
+-        self.status_var.set("复制英文后点一下 Ctrl 就翻译")
++        try:
++            旧 = getattr(self, "_status_after", None)
++            if 旧 is not None:
++                try:
++                    self.root.after_cancel(旧)
++                except Exception:
++                    pass
++                self._status_after = None
++        except Exception:
++            pass
++        self.status_var.set("")
++        self._status_hide()
++
++    def _status_show(self):
++        """有字才占地方：把状态条插到按钮行上面。"""
++        try:
++            if self.status_label.winfo_ismapped():
++                return
++            按钮行 = getattr(self, "_btns", None)
++            if 按钮行 is not None:
++                self.status_label.pack(fill="x", padx=16, pady=(0, 4), before=按钮行)
++            else:
++                self.status_label.pack(fill="x", padx=16, pady=(0, 4))
++        except Exception:
++            pass
++
++    def _status_hide(self):
++        try:
++            self.status_label.pack_forget()
++        except Exception:
++            pass
++
++    def _status_hide_and_clear(self):
++        try:
++            self.status_var.set("")
++        except Exception:
++            pass
++        self._status_hide()
++
++    def _tip_show(self, 文本, 事件):
++        try:
++            self._tip.show(文本, 事件.x_root, 事件.y_root)
++        except Exception:
++            pass
++
++    def _tip_hide(self, _事件=None):
++        try:
++            self._tip.hide()
++        except Exception:
++            pass
++
++    def _say_transient(self, 文本):
++        """平时安静：冒一句小字，2 秒后自己消失。"""
++        try:
++            旧 = getattr(self, "_status_after", None)
++            if 旧 is not None:
++                try:
++                    self.root.after_cancel(旧)
++                except Exception:
++                    pass
++        except Exception:
++            pass
++        self.status_var.set(文本)
++        self._status_show()
++        try:
++            self._status_after = self.root.after(2000, self._status_hide_and_clear)
++        except Exception:
++            self._status_after = None
+ 
+     def on_hide(self):
+         self._outside_watch = False
++        self._tip_hide()
+         self.root.withdraw()
+         self._home_status()
+ 
+     def on_quit(self):
++        self._tip_hide()
+         if self._cancel_event is not None:
+             self._cancel_event.set()
+         try:
+@@ -485,11 +707,20 @@ class App:
+         except Exception:
+             pass
+         self._auto_split()
++        # _auto_split 改完原文框高度后，实际需要的高度可能超过窗口：再兜一次底
++        try:
++            旧高 = self._window_h
++            self._ensure_fits()
++            if self._window_h > 旧高:
++                self._place_top_right()
++                self.root.update()
++        except Exception:
++            pass
+ 
+     def _toggle_source(self):
+         self._source_expanded = not self._source_expanded
+         try:
+-            self.expand_btn.configure(text="收起" if self._source_expanded else "展开")
++            self.expand_btn.configure(text="▴" if self._source_expanded else "▾")
+         except Exception:
+             pass
+         self._refit()
+@@ -508,10 +739,23 @@ class App:
+                 行高,
+                 屏高,
+             )
++            self._ensure_fits()
+             self._place_top_right()
+         except Exception:
+             pass
+ 
++    def _ensure_fits(self):
++        """窗口实际高度至少装下 chrome（按钮行）：不够就长高到请求高度（封顶）。"""
++        try:
++            self.root.update_idletasks()
++            需要 = int(self.root.winfo_reqheight())
++            屏高 = int(self.root.winfo_screenheight())
++            上限 = max(WIN_H, min(int(屏高 * 0.72), 900))
++            if 需要 > self._window_h:
++                self._window_h = min(需要, 上限)
++        except Exception:
++            pass
++
+     def _is_foreground(self):
+         try:
+             hwnd = ctypes.windll.user32.GetAncestor(self.root.winfo_id(), GA_ROOT)
+@@ -595,6 +839,8 @@ class App:
+             self._outside_watch = False
+ 
+     def popup(self):
++        # 直接顶出来的路径不经过 _refit：先保证窗口装得下按钮行
++        self._ensure_fits()
+         self._place_top_right()
+         try:
+             if self.root.winfo_viewable():
+@@ -634,7 +880,7 @@ class App:
+                 pass
+             return
+         if load_profiles is None:
+-            self.status_var.set("核心模块还没准备好，稍后再打开配置")
++            self._say_transient("核心模块还没准备好，稍后再打开配置")
+             return
+         win = tk.Toplevel(self.root)
+         self.settings_win = win
+@@ -870,14 +1116,37 @@ class App:
+         if not self.keyboard_ok:
+             # 兜底：轮询剪贴板 + 手动按钮
+             if CORE_OK:
+-                self.status_var.set("正在后台，点一下窗口里的翻译剪贴板也行")
++                self.status_var.set("正在后台，点一下窗口里的翻译也行")
++                self._status_show()
+             self.root.after(800, self._poll_clip)
+ 
+     def _hotkey_summon(self):
+         try:
+-            self.root.after(0, self.popup)
++            self.root.after(0, self._summon_and_focus)
++        except Exception:
++            pass
++
++    def _summon_and_focus(self):
++        """Alt+Q 调出：窗口顶到前面，光标落进原文框并全选，打字即替换。"""
++        self.popup()
++        try:
++            self.root.deiconify()
++            self.root.lift()
++            self.root.focus_force()
+         except Exception:
+             pass
++        try:
++            self.src_text.focus_set()
++            self.src_text.tag_add("sel", "1.0", "end-1c")
++            self.src_text.mark_set("insert", "end-1c")
++            self.src_text.see("insert")
++        except Exception:
++            pass
++
++    def _on_src_return(self, _事件=None):
++        """原文框里回车 = 点翻译，不用碰鼠标；Shift+回车仍换行。"""
++        self.on_input()
++        return "break"
+ 
+     def _on_ctrl_down(self, _e):
+         self._ctrl_down_t = time.time()
+@@ -934,9 +1203,19 @@ class App:
+ 
+     def on_manual(self, from_hotkey=False):
+         text = self.read_clip()
++        if not from_hotkey:
++            # 点按钮：框里有自己打的字就翻框里的，不被剪贴板覆盖
++            框里 = self.src_text.get("1.0", "end").strip()
++            if 框里 and 框里 != (text or "").strip():
++                self.on_input()
++                return
+         if not text or not text.strip():
++            # 剪贴板是空的就退而求其次：翻原文框里打的字
++            if self.src_text.get("1.0", "end").strip():
++                self.on_input()
++                return
+             self.popup()
+-            self.status_var.set("剪贴板是空的，先复制一段英文")
++            self._say_transient("先复制英文，或在下面打字再点翻译")
+             return
+         self.last_clip = text
+         short = text.strip()[:500].rstrip("\n") + "\n"
+@@ -948,7 +1227,7 @@ class App:
+     def on_input(self):
+         text = self.src_text.get("1.0", "end").strip()
+         if not text:
+-            self.status_var.set("下面原文框里先打字，再点翻译输入")
++            self._say_transient("下面原文框里先打字，再点翻译")
+             return
+         self._run_translate(text, False)
+ 
+@@ -1018,10 +1297,12 @@ class App:
+ 
+     def _show_dict(self, 结果):
+         try:
+-            self.dst_text.tag_config("词", font=("微软雅黑", 15, "bold"))
+-            self.dst_text.tag_config("音标", foreground="#666666")
+-            self.dst_text.tag_config("词性", font=("微软雅黑", 10, "bold"), foreground="#1a73e8")
+-            self.dst_text.tag_config("例句", foreground="#666666")
++            self.dst_text.tag_config("词", font=WORD_FONT, foreground=MAIN_FG)
++            self.dst_text.tag_config("音标", font=PHON_FONT, foreground=FAINT_FG)
++            self.dst_text.tag_config("词性", font=POS_FONT, foreground=ACCENT)
++            self.dst_text.tag_config("释义", font=FONT, foreground=MAIN_FG)
++            self.dst_text.tag_config("例英", font=SRC_FONT, foreground="#323130", lmargin1=16, lmargin2=16)
++            self.dst_text.tag_config("例中", font=SRC_FONT, foreground=SUB_FG, lmargin1=16, lmargin2=16)
+         except Exception:
+             pass
+         self.dst_text.delete("1.0", "end")
+@@ -1033,34 +1314,46 @@ class App:
+             音标行 = " ".join(p for p in [f"英 {英音}" if 英音 else "", f"美 {美音}" if 美音 else ""] if p)
+             if 音标行:
+                 self.dst_text.insert("end", 音标行, "音标")
+-            self.dst_text.insert("end", "\n")
++            self.dst_text.insert("end", "\n\n")
+             序号 = 0
+             for 义项 in (结果.senses or []):
+                 词性 = str(义项.get("pos", "")).strip()
+                 意思 = [str(m).strip() for m in (义项.get("defs", []) or []) if str(m).strip()]
+                 if 词性 or 意思:
+-                    self.dst_text.insert("end", "\n" + (词性 + " " if 词性 else "") + "；".join(意思) + "\n", "词性" if 词性 else None)
++                    if 词性:
++                        self.dst_text.insert("end", 词性 + " ", "词性")
++                    if 意思:
++                        self.dst_text.insert("end", "；".join(意思), "释义")
++                    self.dst_text.insert("end", "\n")
+                 for 例 in (义项.get("examples", []) or []):
+                     序号 += 1
+                     英 = str(例.get("en", "")).strip()
+                     中 = str(例.get("zh", "")).strip()
+                     if 英:
+-                        self.dst_text.insert("end", f"例{序号} {英}\n", "例句")
++                        self.dst_text.insert("end", f"例{序号}  {英}\n", "例英")
+                     if 中:
+-                        self.dst_text.insert("end", f"      {中}\n", "例句")
++                        self.dst_text.insert("end", f"       {中}\n", "例中")
++                self.dst_text.insert("end", "\n")
+         except Exception:
+             self.dst_text.delete("1.0", "end")
+             self.dst_text.insert("1.0", str(结果))
+         self._source_expanded = False
+         self._source_compact_lines = 1
+         try:
+-            self.expand_btn.configure(text="展开")
++            self.expand_btn.configure(text="▾")
+         except Exception:
+             pass
+         self.dst_text.see("1.0")
+         self.popup()
+         self._refit()
+ 
++    def _滚轮(self, widget, 事件):
++        try:
++            widget.yview_scroll(int(-事件.delta / 120), "units")
++        except Exception:
++            pass
++        return "break"
++
+     def _pane_lines(self, widget):
+         try:
+             got = widget.count("1.0", "end", "displaylines")
+@@ -1072,30 +1365,52 @@ class App:
+             except Exception:
+                 return 1
+ 
+-    def _pane_pixels(self, widget, 行高):
++    def _auto_split(self):
++        """按内容定原文框占几行，剩下的全给译文。"""
++        try:
++            if self._source_expanded:
++                源行 = min(self._pane_lines(self.src_text), 10)
++            else:
++                源行 = self._source_compact_lines
++            self.src_text.configure(height=max(1, min(int(源行), 12)))
++        except Exception:
++            pass
++
++    def _div_hover_in(self, _事件=None):
+         try:
+-            got = widget.count("1.0", "end-1c", "ypixels")
+-            return int(got[0] if isinstance(got, tuple) else got)
++            self.div_line.configure(background="#B3D7F5")
+         except Exception:
+-            return self._pane_lines(widget) * 行高
++            pass
+ 
+-    def _auto_split(self):
++    def _div_hover_out(self, _事件=None):
+         try:
+-            self.root.update_idletasks()
++            self.div_line.configure(background=LINE)
+         except Exception:
+             pass
++
++    def _div_start(self, 事件):
+         try:
+-            total = self.paned.winfo_height()
+-            if total < 50:
++            self._div_y = float(事件.y_root)
++        except Exception:
++            self._div_y = None
++        self._div_acc = 0.0
++
++    def _div_drag(self, 事件):
++        """往下拉分隔线 → 译文变大、原文变小；反之亦然。只管当前这一次。"""
++        if self._div_y is None:
++            return
++        try:
++            行高 = tkfont.Font(font=SRC_FONT).metrics("linespace")
++            self._div_acc += float(事件.y_root) - self._div_y
++            self._div_y = float(事件.y_root)
++            整行 = int(self._div_acc / 行高)
++            if 整行 == 0:
+                 return
+-            行高 = tkfont.Font(font=FONT).metrics("linespace")
+-            题高 = tkfont.Font(font=TITLE_FONT).metrics("linespace")
+-            if self._source_expanded:
+-                源高 = _算原文高度(self._pane_pixels(self.src_text, 行高), 题高, 行高)
+-            else:
+-                源高 = _算原文高度(self._source_compact_lines * 行高, 题高, 行高)
+-            源高 = min(源高, int(total * 0.70))
+-            self.paned.sashpos(0, max(60, total - 源高))
++            self._div_acc -= 整行 * 行高
++            现在 = int(self.src_text.cget("height"))
++            新高 = min(12, max(1, 现在 - 整行))
++            if 新高 != 现在:
++                self.src_text.configure(height=新高)
+         except Exception:
+             pass
+ 
+@@ -1132,9 +1447,9 @@ class App:
+             else:
+                 self.root.clipboard_clear()
+                 self.root.clipboard_append(data)
+-            self.status_var.set("译文已复制，去别处粘贴就行")
++            self._say_transient("译文已复制，去别处粘贴就行")
+         except Exception as e:
+-            self.status_var.set(f"复制失败：{e}")
++            self._say_transient(f"复制失败：{e}")
+ 
+     def run(self):
+         self.root.mainloop()

@@ -1,1 +1,1 @@
-{"level":"L2"}
+{"level":"L2","level_reason":"改 app.py 一个文件（翻译按钮优先框里打的字；_ensure_fits 高度兜底）+ 加 tests/test_manual.py 两个离线单测；不碰对外接口、无数据删除、可回退"}
