@@ -1,1 +1,1 @@
-{"level":"L2","level_reason":"改 app.py 一个文件（翻译按钮优先框里打的字；_ensure_fits 高度兜底）+ 加 tests/test_manual.py 两个离线单测；不碰对外接口、无数据删除、可回退"}
+{"level":"L3","level_reason":"跨模块：app.py 拆出 translator_theme/translator_layout/translator_settings_window 三个新模块，多文件联动；搬家虽不改逻辑但 import 方向与回调接线属对外接口级风险；可 git 回退","review_required":true}
