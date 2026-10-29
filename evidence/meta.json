@@ -1,1 +1,1 @@
-{"level":"L3","level_reason":"跨模块：app.py 拆出 translator_theme/translator_layout/translator_settings_window 三个新模块，多文件联动；搬家虽不改逻辑但 import 方向与回调接线属对外接口级风险；可 git 回退","review_required":true}
+{"level":"L2","level_reason":"只重打单文件 exe（含新拆 theme/layout/settings_window 三模块）；dist/ 不入库、旧 exe 已备份、可回退；不改代码"}
