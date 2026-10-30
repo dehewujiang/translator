@@ -1,1 +1,46 @@
-{"checked":["1. py_compile：亲手跑 python -m py_compile app.py translator_theme.py translator_layout.py translator_settings_window.py，通过无报错","2. 单测52全过：亲手跑 python -m unittest discover -s tests -v，Ran 52 tests，OK","3. 搬家逐段比对：以 git HEAD:app.py（1463行，拆前）为基准，用程序比对——translator_theme/layout/settings_window 内全部函数/方法体与HEAD对应行逐行一致（含配置窗askstring行字后全角逗号U+FF0C，双方字节相同）；app.py的diff仅为删除搬走块+新增三模块import+class App改为混入SettingsWindowMixin，无其他逻辑改动；ACCENT_PRESS/DARK_BTN/HINT_FG在HEAD正文零引用，未导入无影响","4. 配置窗探针：屏蔽托盘/钩子/单实例后起真实App并open_settings，窗口620x480正常打开，列出2个方案（default/deepseek），回填无报错，PROBE_PASS"],"findings":["tests/test_layout.py仅把import源从app换成translator_layout，断言一字未动，属拆分配套，非放水","AGENTS.md模块地图与依赖方向已同步三新模块，属范围内文档同步",".gitignore新增.claude/一行与拆分无关，记一笔但不阻断","evidence/ui-*.png为有效图片（398x500/398x581），mtime晚于代码改动，时间顺序合规"],"reviewed_at":"2026-10-29T15:00:00+08:00","task":"L3 保守拆分独立验收","verdict":"通过"}
+{
+  "verdict": "通过",
+  "task_verdict": "有条件通过",
+  "round": 2,
+  "previous_verdict": "打回",
+  "reviewer": "验收小工",
+  "checked": [
+    "状态条（blocker）：真实 App（stub `_start_trigger/_start_tray/_start_singleton_server`，同 `evidence/grab_ui.py`）调用 `_say_transient('译文已复制，去粘贴试试')` 后 `footer.winfo_height()==32`、`translate_btn.winfo_height()==32`、`header.winfo_height()==28`、`status_label.master is header`；`_status_hide()` 后仍 32/32；带文本时 card 596→596、root 612→612，无文本时 card 446→446，状态条不再改变卡片高度。",
+    "顶栏裁切：同一真实 App 测得 `header.winfo_height()==28`、`copy_btn.winfo_reqheight()==copy_btn.winfo_height()==28`、`close_btn` 同为 28；`app.py:212-263` 的 header height=ICON_BTN、按钮 height=ICON_BTN 与实测一致，无 2px 裁切。",
+    "FIXED_CHROME：`translator_layout.FIXED_CHROME==203`；实测 `root.winfo_reqheight() 462 - dst_text.winfo_reqheight() 174 - src_text.winfo_reqheight() 85 == 203`；`app.py` pack 参数逐项对上（card padx/pady 8/8、header pady(12,0)/h28、dst pady(8,0)、divider pady(22,0)/h9、src_head pady(14,0)/h28、src_text pady(6,0)、footer pady(10,18)/h32）；`HEADER_H==LABEL_H==ICON_BTN==28`；`tests/test_layout.py` 的 `test_顶栏与原文行高度等于图标按钮尺寸` 与 `test_固定铬等于203` 直接断言这些关系，不再只对常量做同义相加。",
+    "翻译按钮：`translate_btn.winfo_reqheight()==32`；`app.py:374-392` 使用 96x32 图片、width=96/height=32、bd=0/padx=0/pady=0；`footer.winfo_height()==32`，按钮与底栏等高。",
+    "死代码/导入：AST+grep 复查 `app.py` 中 `_按钮|ttk|TITLE_FONT|ACCENT_PRESS|RADIUS|EDGE|GAP|ICON_FG` 均 0 命中；app.py 从 `translator_theme` 导入的 26 个符号全部有使用；`python -c \"import app\"` 输出 `IMPORT OK`；`python -m py_compile app.py translator_theme.py translator_layout.py translator_settings_window.py` 退出 0。全仓复查 translator_theme.py 仍有未引用的 RADIUS/GAP/TITLE_FONT（见 findings，属清理项）。",
+    "证据文件：`python evidence/check_layout.py` 单独运行 5/5 次退出 0、末行 `ALL PASS`（状态显示/隐藏时 footer 与按钮均 32、四角 13x13、462/612 两个高度对齐、窗口内 magenta=0）；`python -m unittest discover -s tests -v` 新鲜运行 `Ran 58 tests ... OK`；`git diff --numstat -- tests` 为 `43 0`（无删除）；`evidence/test-a1.log` 13:04:55 显示 58 tests OK，晚于 `tests/test_layout.py` 13:03:22；`evidence/summary.md` 标题/正文为本轮“状态条压扁底栏等 6 缺陷修复”；`evidence/meta.json` level=L3、review_required=true。",
+    "回归：`C:\\Users\\Administrator\\AppData\\Local\\Temp\\opencode\\smoke_borderless.py` 两次运行均 `drag_ok=True`、`close_ok=True`、`esc_ok=True`；真实 `_toggle_source` 展开/收起路径 491→635→624 三个高度，四角遮罩均为 13x13 且 bl/br 的 y==h-21。",
+    "视觉值：`evidence/mockup-a1.png`/`mockup-a2.png` 与当前渲染对照，主蓝≈#2563EB、圆角 12/8、PAD_X=18、主按钮 96x32、角遮罩 13x13 均未变；未评审审美方向。"
+  ],
+  "missing": [],
+  "findings": [
+    {
+      "file": "translator_theme.py",
+      "issue": "全仓复查仍有未引用的定义：RADIUS（第 38 行，仅赋值）、GAP（第 41 行，仅赋值）、TITLE_FONT（第 23 行，仅赋值；HEAD 已有）。app.py 侧已全部清理，但第 5 条若按“全仓无未使用定义”严格解读，本轮只完成了 app.py 部分；不影响 import/运行。",
+      "evidence": "AST/grep：translator_theme.py:23/38/41 各 1 次；app.py 0 命中；`python -c \"import app\"` 成功。"
+    },
+    {
+      "file": "evidence/run-a1.json",
+      "issue": "仍是上一轮 12:15 的旧证据：tests.count=56、fixed_chrome=189，与本轮 58 tests / FIXED_CHROME=203 矛盾；summary.md 未引用它，但留在 evidence 里会误导后续复核。",
+      "evidence": "evidence/run-a1.json mtime 2026-10-30 12:15:43；当前 evidence/test-a1.log 13:04:55 显示 Ran 58 tests OK；translator_layout.FIXED_CHROME=203。"
+    },
+    {
+      "file": "evidence/check_layout.py",
+      "issue": "单独运行稳定（5/5 ALL PASS），但与另一个会 focus_force 的 Tk App（smoke_borderless.py）同时运行时 3/3 退化为 FAILED 2：窗口被 FocusOut 隐藏后第二次 _place_top_right 的 geometry 未在 root.update() 内生效，check_corners 用 root.winfo_height() 算期望、_place_corners 用 _window_h 放置，隐藏态二者错位。属检查脚本的时序/焦点鲁棒性问题；独立探针在真实 462/491/612/635 高度均对齐，不是产品布局回归。",
+      "evidence": "单独 `python evidence/check_layout.py` 5 次均 exit 0/ALL PASS；与 smoke 并行 3 次均 `FAILED 2`（角遮罩@462/bl y=591 vs 期望 441）。"
+    }
+  ],
+  "blocking": [],
+  "notes": [
+    "上一轮（round 1）裁决为 打回；本轮按任务卡只复验 6 项修复 + 回归/视觉值。",
+    "状态条最终位置：status_label 的 master 是 self.header；header 设了 pack_propagate(False) 且 height=ICON_BTN，状态标签显示/隐藏只改 header 内部布局，不参与卡片高度计算。",
+    "四角遮罩独立探针：462/491/612/635 高度下均 13x13，bl/br y 恒为 h-8-13；两高度对齐要求满足。",
+    "拖拽/✕/Esc：smoke 断言三项均 True；Esc 仍需窗口有键盘焦点，属任务卡明确允许的既有行为，未按回归判。",
+    "红绿说明：红证据是上一轮 review.json 里真实 App 复现的 footer=2；绿证据是本轮 check_layout/独立探针的 footer=32。本轮没有新增一份独立的失败日志；若严格按 TDD 留档，建议下次先存失败快照再修。",
+    "本轮未改任何源码、测试或截图；仅写入本 review.json。所有复现脚本/临时输出在 %TEMP%\\opencode 下，未进项目。",
+    "系统四档映射：verdict=通过；任务卡三档映射：task_verdict=有条件通过。条件仅为上面 findings 的清理/稳定化项，不阻断本次功能验收。"
+  ],
+  "reviewed_at": "2026-10-30T13:14:47"
+}
