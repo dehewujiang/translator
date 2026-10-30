@@ -7,7 +7,7 @@
 """
 
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import messagebox, simpledialog
 
 try:
     from translator_settings import (
@@ -26,7 +26,21 @@ except Exception:
     create_empty_profile = None
     is_profile_configured = None
 
-from translator_theme import FONT
+from translator_theme import (
+    FONT,
+    SRC_FONT,
+    LBL_FONT,
+    MAIN_FG,
+    SUB_FG,
+    FAINT_FG,
+    LINE,
+    CARD_BG,
+    ACCENT,
+    HOVER_BG,
+    EDGE,
+    _make_primary_button_image,
+    _make_secondary_button_image,
+)
 
 
 class SettingsWindowMixin:
@@ -44,60 +58,234 @@ class SettingsWindowMixin:
         if load_profiles is None:
             self._say_transient("核心模块还没准备好，稍后再打开配置")
             return
+        页底 = "#F7F8FA"
         win = tk.Toplevel(self.root)
         self.settings_win = win
         win.title("配置")
         win.geometry("620x480")
         win.attributes("-topmost", True)
+        win.configure(bg=页底)
         win.option_add("*Font", FONT)
         self._refreshing_list = False
         self._prof_names = []
 
-        left = ttk.Frame(win, width=180)
-        left.pack(side="left", fill="y", padx=(10, 4), pady=10)
+        left = tk.Frame(win, bg=页底, width=212)
+        left.pack(side="left", fill="y")
         try:
             left.pack_propagate(False)
         except Exception:
             pass
-        ttk.Label(left, text="方案（点一下就换）", style="Title.TLabel").pack(anchor="w")
-        self.prof_list = tk.Listbox(left, font=FONT, exportselection=False)
-        self.prof_list.pack(fill="both", expand=True, pady=(4, 6))
+        tk.Frame(win, width=1, bg=LINE).pack(side="left", fill="y")
+
+        tk.Label(
+            left, text="方案（点一下就换）", font=SRC_FONT, fg=SUB_FG, bg=页底,
+            anchor="w",
+        ).pack(fill="x", padx=20, pady=(20, 10))
+        list_wrap = tk.Frame(
+            left, bg=CARD_BG, bd=0,
+            highlightthickness=1, highlightbackground=EDGE, highlightcolor=ACCENT,
+        )
+        list_wrap.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+        self.prof_list = tk.Listbox(
+            list_wrap, font=FONT, bd=0, relief="flat",
+            highlightthickness=0, bg=CARD_BG, fg=MAIN_FG,
+            selectbackground="#E8EFFF", selectforeground=MAIN_FG,
+            activestyle="none", exportselection=False,
+        )
+        self.prof_list.pack(fill="both", expand=True, padx=6, pady=4)
         self.prof_list.bind("<<ListboxSelect>>", lambda _e: self._on_profile_selected())
-        ttk.Button(left, text="+ 新方案", command=self._settings_add).pack(fill="x")
-
-        right = ttk.Frame(win)
-        right.pack(side="left", fill="both", expand=True, padx=(4, 8), pady=8)
-
-        ttk.Label(right, text="地址").pack(anchor="w")
-        self.s_url_var = tk.StringVar()
-        ttk.Entry(right, textvariable=self.s_url_var).pack(fill="x")
-        ttk.Label(right, text="如 https://api.deepseek.com/v1", foreground="gray").pack(anchor="w")
-
-        ttk.Label(right, text="钥匙").pack(anchor="w", pady=(6, 0))
-        self.s_key_var = tk.StringVar()
-        ttk.Entry(right, textvariable=self.s_key_var, show="*").pack(fill="x")
-        ttk.Label(right, text="去官网申请，粘贴到这里", foreground="gray").pack(anchor="w")
-
-        ttk.Label(right, text="模型").pack(anchor="w", pady=(6, 0))
-        self.s_model_var = tk.StringVar()
-        ttk.Entry(right, textvariable=self.s_model_var).pack(fill="x")
-        ttk.Label(right, text="如 deepseek-flash，照文档抄", foreground="gray").pack(anchor="w")
-
-        ttk.Label(right, text="翻译要求（想让它怎么翻就怎么写）").pack(anchor="w", pady=(6, 0))
-        self.s_prompt_text = tk.Text(right, height=5, font=FONT, wrap="word")
-        self.s_prompt_text.pack(fill="x")
-
-        self.s_hint_var = tk.StringVar(value="")
-        ttk.Label(right, textvariable=self.s_hint_var, wraplength=400).pack(
-            fill="x", pady=(4, 0)
+        self.prof_list.bind(
+            "<FocusIn>", lambda _e: list_wrap.configure(highlightbackground=ACCENT)
+        )
+        self.prof_list.bind(
+            "<FocusOut>", lambda _e: list_wrap.configure(highlightbackground=EDGE)
         )
 
-        row = ttk.Frame(right)
-        row.pack(fill="x", pady=8)
-        ttk.Button(row, text="保存", command=self._settings_save).pack(side="left", padx=2)
-        ttk.Button(row, text="删除", command=self._settings_delete).pack(side="left", padx=2)
+        def _bind_hover(btn, imgs):
+            def on_enter(_e=None):
+                try:
+                    btn.configure(image=imgs.get("hover", imgs.get("normal")))
+                except Exception:
+                    pass
+
+            def on_leave(_e=None):
+                try:
+                    btn.configure(image=imgs.get("normal"))
+                except Exception:
+                    pass
+
+            def on_press(_e=None):
+                try:
+                    btn.configure(image=imgs.get("press", imgs.get("normal")))
+                except Exception:
+                    pass
+
+            def on_release(_e=None):
+                try:
+                    btn.configure(image=imgs.get("hover", imgs.get("normal")))
+                except Exception:
+                    pass
+
+            btn.bind("<Enter>", on_enter)
+            btn.bind("<Leave>", on_leave)
+            btn.bind("<ButtonPress-1>", on_press)
+            btn.bind("<ButtonRelease-1>", on_release)
+
+        try:
+            self._s_add_imgs = {
+                k: _make_secondary_button_image(k, 148, 32)
+                for k in ("normal", "hover", "press")
+            }
+        except Exception:
+            self._s_add_imgs = {}
+        add_btn = tk.Button(
+            left, text="+ 新方案", command=self._settings_add,
+            image=self._s_add_imgs.get("normal"), compound="center",
+            relief="flat", bd=0, highlightthickness=0, cursor="hand2",
+            takefocus=0, bg=页底, fg=MAIN_FG,
+            activebackground=页底, activeforeground=MAIN_FG,
+            font=FONT, width=148, height=32, padx=0, pady=0,
+        )
+        if not self._s_add_imgs:
+            try:
+                add_btn.configure(image="", bg=HOVER_BG, activebackground="#E6E9EF")
+            except Exception:
+                pass
+        add_btn.pack(fill="x", padx=20, pady=(0, 20))
+        _bind_hover(add_btn, self._s_add_imgs)
+
+        right = tk.Frame(win, bg=CARD_BG)
+        right.pack(side="left", fill="both", expand=True)
+        body = tk.Frame(right, bg=CARD_BG)
+        body.pack(fill="both", expand=True, padx=20, pady=20)
+
+        self.s_hint_var = tk.StringVar(value="")
+        row = tk.Frame(body, bg=CARD_BG)
+        row.pack(side="bottom", fill="x", pady=(16, 0))
+        hint_stat = tk.Label(
+            body, textvariable=self.s_hint_var, font=SRC_FONT, fg=SUB_FG,
+            bg=CARD_BG, anchor="w", justify="left", wraplength=380,
+        )
+        hint_stat.pack(side="bottom", fill="x", pady=(8, 0))
+
+        def _recolor_hint(*_a):
+            try:
+                v = self.s_hint_var.get()
+                hint_stat.configure(
+                    fg="#C0392B" if v.startswith("读配置失败") else SUB_FG
+                )
+            except Exception:
+                pass
+
+        try:
+            self.s_hint_var.trace_add("write", _recolor_hint)
+        except Exception:
+            pass
+
+        def 字段名(text):
+            return tk.Label(
+                body, text=text, font=SRC_FONT, fg=SUB_FG, bg=CARD_BG, anchor="w"
+            )
+
+        def 提示(text):
+            return tk.Label(
+                body, text=text, font=LBL_FONT, fg=FAINT_FG, bg=CARD_BG, anchor="w"
+            )
+
+        def 输入框(var, show=None):
+            e = tk.Entry(
+                body, textvariable=var, font=FONT, relief="flat", bd=0,
+                highlightthickness=1, highlightbackground=EDGE, highlightcolor=ACCENT,
+                bg=CARD_BG, fg=MAIN_FG, insertbackground=MAIN_FG,
+            )
+            if show:
+                e.configure(show=show)
+            return e
+
+        字段名("地址").pack(fill="x")
+        self.s_url_var = tk.StringVar()
+        输入框(self.s_url_var).pack(fill="x", pady=(4, 0), ipady=4)
+        提示("如 https://api.deepseek.com/v1").pack(fill="x", pady=(4, 0))
+
+        字段名("钥匙").pack(fill="x", pady=(12, 0))
+        self.s_key_var = tk.StringVar()
+        输入框(self.s_key_var, show="*").pack(fill="x", pady=(4, 0), ipady=4)
+        提示("去官网申请，粘贴到这里").pack(fill="x", pady=(4, 0))
+
+        字段名("模型").pack(fill="x", pady=(12, 0))
+        self.s_model_var = tk.StringVar()
+        输入框(self.s_model_var).pack(fill="x", pady=(4, 0), ipady=4)
+        提示("如 deepseek-flash，照文档抄").pack(fill="x", pady=(4, 0))
+
+        字段名("翻译要求（想让它怎么翻就怎么写）").pack(fill="x", pady=(12, 0))
+        self.s_prompt_text = tk.Text(
+            body, height=5, font=SRC_FONT, wrap="word",
+            relief="flat", bd=0, highlightthickness=1,
+            highlightbackground=EDGE, highlightcolor=ACCENT,
+            bg=CARD_BG, fg=MAIN_FG, insertbackground=MAIN_FG,
+            padx=6, pady=4,
+        )
+        self.s_prompt_text.pack(fill="both", expand=True, pady=(4, 0))
+
+        try:
+            self._s_save_imgs = {
+                k: _make_primary_button_image(k, 88, 32)
+                for k in ("normal", "hover", "press")
+            }
+        except Exception:
+            self._s_save_imgs = {}
+        save_btn = tk.Button(
+            row, text="保存", command=self._settings_save,
+            image=self._s_save_imgs.get("normal"), compound="center",
+            relief="flat", bd=0, highlightthickness=0, cursor="hand2",
+            takefocus=0, bg=CARD_BG, fg="#FFFFFF",
+            activebackground=CARD_BG, activeforeground="#FFFFFF",
+            font=FONT, width=88, height=32, padx=0, pady=0,
+        )
+        if not self._s_save_imgs:
+            try:
+                save_btn.configure(
+                    image="", bg=ACCENT, activebackground=ACCENT
+                )
+            except Exception:
+                pass
+        save_btn.pack(side="right")
+        _bind_hover(save_btn, self._s_save_imgs)
+
+        try:
+            self._s_del_imgs = {
+                k: _make_secondary_button_image(k, 88, 32)
+                for k in ("normal", "hover", "press")
+            }
+        except Exception:
+            self._s_del_imgs = {}
+        del_btn = tk.Button(
+            row, text="删除", command=self._settings_delete,
+            image=self._s_del_imgs.get("normal"), compound="center",
+            relief="flat", bd=0, highlightthickness=0, cursor="hand2",
+            takefocus=0, bg=CARD_BG, fg=MAIN_FG,
+            activebackground=CARD_BG, activeforeground=MAIN_FG,
+            font=FONT, width=88, height=32, padx=0, pady=0,
+        )
+        if not self._s_del_imgs:
+            try:
+                del_btn.configure(
+                    image="", bg=HOVER_BG, activebackground="#E6E9EF"
+                )
+            except Exception:
+                pass
+        del_btn.pack(side="right", padx=(0, 8))
+        _bind_hover(del_btn, self._s_del_imgs)
 
         self._refresh_settings_list()
+
+        try:
+            win.update_idletasks()
+            高 = max(480, win.winfo_reqheight())
+            高 = min(高, win.winfo_screenheight() - 100)
+            win.geometry(f"620x{高}")
+        except Exception:
+            pass
 
     def _selected_profile_name(self):
         try:

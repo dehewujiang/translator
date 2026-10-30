@@ -12,7 +12,7 @@ import threading
 import time
 import tkinter as tk
 from tkinter import font as tkfont
-from tkinter import messagebox, ttk
+from tkinter import messagebox
 
 try:
     from translator_core import run_intent
@@ -65,9 +65,12 @@ except Exception:
     HAS_PYSTRAY = False
 
 from translator_theme import (
-    FONT, SRC_FONT, TITLE_FONT, WORD_FONT, PHON_FONT, POS_FONT,
-    MAIN_FG, SUB_FG, FAINT_FG, LINE, CARD_BORDER, ROOT_BG, CARD_BG,
-    ACCENT, ACCENT_HOVER, HAS_PIL, _Tip, _make_tray_image, _按钮,
+    FONT, SRC_FONT, LBL_FONT, WORD_FONT, PHON_FONT, POS_FONT,
+    MAIN_FG, SUB_FG, FAINT_FG, LINE, CARD_BG,
+    ACCENT, ACCENT_HOVER, HOVER_BG, KEY_COLOR,
+    PAD_X, HAS_PIL, ICON_BTN, _Tip, _make_tray_image,
+    _make_copy_image, _make_close_image, _make_chevron_image,
+    _make_gear_image, _make_primary_button_image, _make_corner_image,
 )
 from translator_layout import WIN_W, WIN_H, _算原文高度, _算窗口高度
 from translator_settings_window import SettingsWindowMixin
@@ -147,38 +150,37 @@ def _release_singleton():
 class App(SettingsWindowMixin):
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("英文翻译小助手")
+        self._borderless_ok = True
+        self._transparent_ok = True
+        try:
+            self.root.overrideredirect(True)
+        except Exception:
+            self._borderless_ok = False
         self.root.geometry(f"{WIN_W}x{WIN_H}")
         self._window_h = WIN_H
         self._place_top_right()
         self.root.attributes("-topmost", True)
         self.root.option_add("*Font", FONT)
         try:
-            self.root.configure(background=ROOT_BG)
+            self.root.configure(background=KEY_COLOR)
         except Exception:
             pass
         try:
-            style = ttk.Style()
-            for theme in ("clam", "vista", "xpnative"):
-                try:
-                    style.theme_use(theme)
-                    break
-                except Exception:
-                    continue
-            style.configure("TFrame", background=ROOT_BG)
-            style.configure("TLabel", background=ROOT_BG, foreground=SUB_FG)
-            style.configure("Card.TFrame", background=CARD_BG)
-            style.configure("Card.TLabel", background=CARD_BG, foreground=SUB_FG)
-            style.configure("Status.TLabel", foreground=SUB_FG, background=ROOT_BG)
-            style.configure("Title.TLabel", font=TITLE_FONT, foreground=FAINT_FG, background=CARD_BG)
+            self.root.wm_attributes("-transparentcolor", KEY_COLOR)
         except Exception:
-            pass
+            self._transparent_ok = False
         # 启动就藏到后台，不打扰
         self.root.withdraw()
-        # 点右上角叉只藏起来，不退出
+        # 无标题栏也要留着：任务栏右键关、保险
         self.root.protocol("WM_DELETE_WINDOW", self.on_hide)
         # 点窗口外面就立刻藏起（无延迟）
         self.root.bind("<FocusOut>", self._on_focus_out)
+        # 无标题栏后 Esc 是键盘唯一的藏起路
+        self.root.bind("<Escape>", lambda _e: self.on_hide())
+        self._drag_x = None
+        self._drag_y = None
+        self._corners = {}
+        self._corner_imgs = {}
 
         self.last_trigger = 0.0
         self.last_clip = ""
@@ -196,37 +198,77 @@ class App(SettingsWindowMixin):
         self.settings_win = None
         self.tray_icon = None
 
-        # ---- 状态条平时不占地方：有字才冒出来 ----
+        # ---- 白卡片：窗口里唯一的实面，四周 8px 透明边 ----
+        self.card = tk.Frame(self.root, background=CARD_BG, bd=0, highlightthickness=0)
+        self.card.pack(padx=8, pady=8, fill="both", expand=True)
+
+        # ---- 状态条平时不占地方：有字才冒出来，寄在顶栏左侧空位 ----
         self.status_var = tk.StringVar(value="")
         self._status_after = None
-        self.status_label = tk.Label(
-            self.root,
-            textvariable=self.status_var,
-            font=("微软雅黑", 9),
-            foreground=SUB_FG,
-            background=ROOT_BG,
-        )
         self._tip = _Tip(self.root)
         self._home_status()
 
-        # ---- 译文（上）+ 原文（下）：译文优先，中间细线可拖动手调 ----
-        body = ttk.Frame(self.root, style="Card.TFrame")
-        body.pack(fill="both", expand=True, padx=12, pady=(12, 0))
-
-        pane_dst = ttk.Frame(body, style="Card.TFrame")
-        pane_dst.pack(fill="both", expand=True)
-        dst_head = ttk.Frame(pane_dst, style="Card.TFrame")
-        dst_head.pack(fill="x", padx=12, pady=(10, 2))
-        self.copy_btn = _按钮(dst_head, "⧉", self.on_copy, 链接=True)
+        # ---- 顶栏 28px：复制 + 关闭右对齐，状态条居左；整条可拖 ----
+        self.header = tk.Frame(self.card, background=CARD_BG, height=ICON_BTN)
+        self.header.pack(fill="x", padx=PAD_X, pady=(12, 0))
         try:
-            self.copy_btn.configure(font=("微软雅黑", 11))
+            self.header.pack_propagate(False)
         except Exception:
             pass
-        self.copy_btn.pack(side="right")
+        # 状态条寄生在顶栏左侧：顶栏高度固定，不挤卡片，底栏不会被裁
+        self.status_label = tk.Label(
+            self.header,
+            textvariable=self.status_var,
+            font=("微软雅黑", 9),
+            foreground=SUB_FG,
+            background=CARD_BG,
+        )
+        self.header.bind("<ButtonPress-1>", self._drag_start)
+        self.header.bind("<B1-Motion>", self._drag_move)
+        try:
+            self._copy_img = _make_copy_image(ICON_BTN)
+            self._close_img = _make_close_image(ICON_BTN)
+        except Exception:
+            self._copy_img = None
+            self._close_img = None
+        self.close_btn = tk.Button(
+            self.header,
+            image=self._close_img,
+            command=self.on_hide,
+            relief="flat",
+            bd=0,
+            bg=CARD_BG,
+            activebackground=HOVER_BG,
+            cursor="hand2",
+            width=ICON_BTN,
+            height=ICON_BTN,
+            takefocus=0,
+            highlightthickness=0,
+        )
+        self.close_btn.pack(side="right")
+        self.copy_btn = tk.Button(
+            self.header,
+            image=self._copy_img,
+            command=self.on_copy,
+            relief="flat",
+            bd=0,
+            bg=CARD_BG,
+            activebackground=HOVER_BG,
+            cursor="hand2",
+            width=ICON_BTN,
+            height=ICON_BTN,
+            takefocus=0,
+            highlightthickness=0,
+        )
+        self.copy_btn.pack(side="right", padx=(0, 2))
         self.copy_btn.bind("<Enter>", lambda e: self._tip_show("复制译文", e))
         self.copy_btn.bind("<Leave>", self._tip_hide)
+        self.close_btn.bind("<Enter>", lambda e: self._tip_show("关闭", e))
+        self.close_btn.bind("<Leave>", self._tip_hide)
+
+        # ---- 译文（上） ----
         self.dst_text = tk.Text(
-            pane_dst,
+            self.card,
             height=5,
             font=FONT,
             wrap="word",
@@ -241,13 +283,13 @@ class App(SettingsWindowMixin):
             padx=4,
             pady=2,
         )
-        self.dst_text.pack(fill="both", expand=True, padx=12)
+        self.dst_text.pack(fill="both", expand=True, padx=PAD_X, pady=(8, 0))
 
         # 可拖动的细分隔线：平时 1px 淡线，鼠标上去变深，拖它调两边高度
-        self.divider = tk.Frame(body, background=CARD_BG, height=9, cursor="sb_v_double_arrow")
-        self.divider.pack(fill="x")
+        self.divider = tk.Frame(self.card, background=CARD_BG, height=9, cursor="sb_v_double_arrow")
+        self.divider.pack(fill="x", pady=(22, 0))
         self.div_line = tk.Frame(self.divider, background=LINE, height=1)
-        self.div_line.pack(fill="x", pady=4)
+        self.div_line.pack(fill="x", padx=PAD_X, pady=4)
         for 部件 in (self.divider, self.div_line):
             部件.bind("<Enter>", self._div_hover_in)
             部件.bind("<Leave>", self._div_hover_out)
@@ -256,21 +298,45 @@ class App(SettingsWindowMixin):
         self._div_y = None
         self._div_acc = 0.0
 
-        pane_src = ttk.Frame(body, style="Card.TFrame")
-        pane_src.pack(fill="x")
-        src_head = ttk.Frame(pane_src, style="Card.TFrame")
-        src_head.pack(fill="x", padx=12, pady=(6, 0))
-        self.expand_btn = _按钮(src_head, "▾", self._toggle_source, 链接=True)
+        # ---- “原文”行：标签左，箭头右 ----
+        self.src_head = tk.Frame(self.card, background=CARD_BG)
+        self.src_head.pack(fill="x", padx=PAD_X, pady=(14, 0))
+        self.src_label = tk.Label(
+            self.src_head,
+            text="原文",
+            font=LBL_FONT,
+            foreground=FAINT_FG,
+            background=CARD_BG,
+        )
+        self.src_label.pack(side="left")
         try:
-            self.expand_btn.configure(font=("微软雅黑", 11))
+            self._chev_down_img = _make_chevron_image(False, ICON_BTN)
+            self._chev_up_img = _make_chevron_image(True, ICON_BTN)
         except Exception:
-            pass
+            self._chev_down_img = None
+            self._chev_up_img = None
+        self.expand_btn = tk.Button(
+            self.src_head,
+            image=self._chev_down_img,
+            command=self._toggle_source,
+            relief="flat",
+            bd=0,
+            bg=CARD_BG,
+            activebackground=HOVER_BG,
+            cursor="hand2",
+            width=ICON_BTN,
+            height=ICON_BTN,
+            takefocus=0,
+            highlightthickness=0,
+        )
         self.expand_btn.pack(side="right")
         self.expand_btn.bind("<Enter>", lambda e: self._tip_show(
             "收起原文" if self._source_expanded else "展开原文", e))
         self.expand_btn.bind("<Leave>", self._tip_hide)
+
+        # ---- 原文（下） ----
         self.src_text = tk.Text(
-            pane_src,
+            self.card,
             height=3,
             font=SRC_FONT,
             wrap="word",
@@ -285,42 +351,86 @@ class App(SettingsWindowMixin):
             padx=4,
             pady=2,
         )
-        self.src_text.pack(fill="x", padx=12, pady=(0, 10))
+        self.src_text.pack(fill="x", padx=PAD_X, pady=(6, 0))
         self.src_text.bind("<MouseWheel>", lambda 事件: self._滚轮(self.src_text, 事件))
         self.src_text.bind("<Return>", self._on_src_return)
         self.dst_text.bind("<MouseWheel>", lambda 事件: self._滚轮(self.dst_text, 事件))
 
-        # ---- 按钮行：蓝色主按钮 + 描边齿轮（等高，Fluent 命令栏） ----
-        btns1 = ttk.Frame(self.root, style="TFrame")
-        btns1.pack(fill="x", padx=12, pady=(8, 12))
-        self._btns = btns1
-        btns1.columnconfigure(0, weight=1)
-        btns1.columnconfigure(1, weight=0)
-        _按钮(btns1, "翻译", self.on_manual, 主=True).grid(
-            row=0, column=0, sticky="ew", padx=(0, 8)
+        # ---- 底栏 32px：翻译按钮左锚定，齿轮右贴边 ----
+        self.footer = tk.Frame(self.card, background=CARD_BG, height=32)
+        self.footer.pack(fill="x", padx=PAD_X, pady=(10, 18))
+        try:
+            self.footer.pack_propagate(False)
+        except Exception:
+            pass
+        self._btns = self.footer
+        try:
+            self._primary_imgs = {
+                k: _make_primary_button_image(k)
+                for k in ("normal", "hover", "press")
+            }
+        except Exception:
+            self._primary_imgs = {}
+        self.translate_btn = tk.Button(
+            self.footer,
+            text="翻译",
+            image=self._primary_imgs.get("normal"),
+            compound="center",
+            command=self.on_manual,
+            relief="flat",
+            bd=0,
+            bg=CARD_BG,
+            fg="#ffffff",
+            activeforeground="#ffffff",
+            font=("微软雅黑", 11),
+            cursor="hand2",
+            width=96,
+            height=32,
+            takefocus=0,
+            highlightthickness=0,
+            padx=0,
+            pady=0,
         )
+        if not self._primary_imgs:
+            try:
+                self.translate_btn.configure(
+                    bg=ACCENT, activebackground=ACCENT_HOVER, width=12, height=1,
+                    image="",
+                )
+            except Exception:
+                pass
+        self.translate_btn.pack(side="left")
+        self.translate_btn.bind("<Enter>", self._primary_hover_in)
+        self.translate_btn.bind("<Leave>", self._primary_hover_out)
+        self.translate_btn.bind("<ButtonPress-1>", lambda _e: self._primary_set("press"))
+        self.translate_btn.bind("<ButtonRelease-1>", lambda _e: self._primary_set("hover"))
+        try:
+            self._gear_img = _make_gear_image(32)
+        except Exception:
+            self._gear_img = None
         self.config_btn = tk.Button(
-            btns1,
-            text="⚙",
+            self.footer,
+            image=self._gear_img,
+            text="" if self._gear_img else "⚙",
             command=self.open_settings,
             relief="flat",
             bd=0,
             bg=CARD_BG,
-            fg="#616161",
-            activebackground="#EDEBE9",
-            activeforeground="#1B1B1B",
-            highlightthickness=1,
-            highlightbackground=CARD_BORDER,
-            highlightcolor=CARD_BORDER,
+            fg=SUB_FG,
             font=("微软雅黑", 13),
+            activebackground=HOVER_BG,
+            activeforeground=SUB_FG,
             cursor="hand2",
-            padx=10,
-            pady=3,
+            width=32,
+            height=32,
             takefocus=0,
+            highlightthickness=0,
         )
-        self.config_btn.grid(row=0, column=1, sticky="ns")
-        self.config_btn.bind("<Enter>", lambda e: self._tip_show("配置", e))
-        self.config_btn.bind("<Leave>", self._tip_hide)
+        self.config_btn.pack(side="right")
+        self.config_btn.bind("<Enter>", self._gear_hover_in)
+        self.config_btn.bind("<Leave>", self._gear_hover_out)
+
+        self._make_corners()
 
         if not CORE_OK:
             self.dst_text.insert("1.0", "正在等待核心模块，请稍后再试（不要关闭）。")
@@ -344,6 +454,12 @@ class App(SettingsWindowMixin):
             return False
 
     def _on_focus_out(self, _event=None):
+        # 无边框窗口刚出现时焦点不在自己身上：指针还在里面就别藏
+        try:
+            if self._pointer_inside():
+                return
+        except Exception:
+            pass
         # 立刻藏起，不加延迟
         try:
             if not self.root.winfo_viewable():
@@ -453,15 +569,11 @@ class App(SettingsWindowMixin):
         self._status_hide()
 
     def _status_show(self):
-        """有字才占地方：把状态条插到按钮行上面。"""
+        """有字才占地方：状态条进顶栏左侧空位，顶栏高度固定，不挤卡片。"""
         try:
             if self.status_label.winfo_ismapped():
                 return
-            按钮行 = getattr(self, "_btns", None)
-            if 按钮行 is not None:
-                self.status_label.pack(fill="x", padx=16, pady=(0, 4), before=按钮行)
-            else:
-                self.status_label.pack(fill="x", padx=16, pady=(0, 4))
+            self.status_label.pack(side="left", padx=(0, PAD_X))
         except Exception:
             pass
 
@@ -539,6 +651,92 @@ class App(SettingsWindowMixin):
         except Exception:
             pass
 
+    def _drag_start(self, 事件):
+        try:
+            self._drag_x = int(事件.x_root - self.root.winfo_x())
+            self._drag_y = int(事件.y_root - self.root.winfo_y())
+        except Exception:
+            self._drag_x = None
+            self._drag_y = None
+
+    def _drag_move(self, 事件):
+        if self._drag_x is None or self._drag_y is None:
+            return
+        try:
+            x = int(事件.x_root - self._drag_x)
+            y = int(事件.y_root - self._drag_y)
+            self.root.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+    def _make_corners(self):
+        try:
+            for 角 in ("tl", "tr", "bl", "br"):
+                img = _make_corner_image(角)
+                self._corner_imgs[角] = img
+                标 = tk.Label(self.root, image=img, bg=KEY_COLOR, bd=0,
+                              highlightthickness=0)
+                标.lift()
+                self._corners[角] = 标
+        except Exception:
+            self._corners = {}
+        self._place_corners()
+
+    def _place_corners(self):
+        if not getattr(self, "_corners", None):
+            return
+        try:
+            高 = int(self._window_h)
+            宽 = WIN_W
+            边 = 13
+            外 = 8
+            位置 = {
+                "tl": (外, 外),
+                "tr": (宽 - 外 - 边, 外),
+                "bl": (外, 高 - 外 - 边),
+                "br": (宽 - 外 - 边, 高 - 外 - 边),
+            }
+            for 角, 标 in self._corners.items():
+                x, y = 位置[角]
+                标.place(x=x, y=y, width=边, height=边)
+                try:
+                    标.lift()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _primary_set(self, 状态):
+        try:
+            img = self._primary_imgs.get(状态)
+            if img is not None:
+                self.translate_btn.configure(image=img)
+        except Exception:
+            pass
+
+    def _primary_hover_in(self, _事件=None):
+        self._primary_set("hover")
+
+    def _primary_hover_out(self, _事件=None):
+        self._primary_set("normal")
+
+    def _gear_hover_in(self, _事件=None):
+        try:
+            self.config_btn.configure(background=HOVER_BG)
+        except Exception:
+            pass
+        try:
+            self._tip_show("配置", _事件) if _事件 is not None else None
+        except Exception:
+            pass
+
+    def _gear_hover_out(self, _事件=None):
+        try:
+            self.config_btn.configure(background=CARD_BG)
+        except Exception:
+            pass
+        self._tip_hide(_事件)
+
     def _place_top_right(self):
         try:
             sw = self.root.winfo_screenwidth()
@@ -568,11 +766,14 @@ class App(SettingsWindowMixin):
                 self.root.update()
         except Exception:
             pass
+        self._place_corners()
 
     def _toggle_source(self):
         self._source_expanded = not self._source_expanded
         try:
-            self.expand_btn.configure(text="▴" if self._source_expanded else "▾")
+            self.expand_btn.configure(
+                image=self._chev_up_img if self._source_expanded else self._chev_down_img
+            )
         except Exception:
             pass
         self._refit()
@@ -595,6 +796,7 @@ class App(SettingsWindowMixin):
             self._place_top_right()
         except Exception:
             pass
+        self._place_corners()
 
     def _ensure_fits(self):
         """窗口实际高度至少装下 chrome（按钮行）：不够就长高到请求高度（封顶）。"""
@@ -607,6 +809,7 @@ class App(SettingsWindowMixin):
                 self._window_h = min(需要, 上限)
         except Exception:
             pass
+        self._place_corners()
 
     def _is_foreground(self):
         try:
@@ -975,7 +1178,7 @@ class App(SettingsWindowMixin):
         self._source_expanded = False
         self._source_compact_lines = 1
         try:
-            self.expand_btn.configure(text="▾")
+            self.expand_btn.configure(image=self._chev_down_img)
         except Exception:
             pass
         self.dst_text.see("1.0")
