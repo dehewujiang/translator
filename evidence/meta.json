@@ -1,1 +1,1 @@
-{"level":"L3","review_required":true,"level_reason":"未提交改动跨四个文件：app.py（无边框窗口/布局/焦点/拖动/状态条改挂顶栏）、translator_theme.py（配色/矢量图标/悬停气泡/ICON_BTN）、translator_layout.py（HEADER_H/LABEL_H 28、FIXED_CHROME 203）、translator_settings_window.py（配置窗整窗重建为 tk 控件）；含 overrideredirect 无边框窗口这类不可自动测试改动，可能变得不可拖动/不可关闭/被 FocusOut 秒藏，需真实窗口回归；无数据不可逆，但交互不可逆性高，需独立验收（round 1 打回、round 2 通过）"}
+{"level": "L2", "level_reason": "同项目内4个启动相关文件小改(run.bat/app.py/requirements.txt/README.md)，不碰翻译逻辑与对外接口，git restore可撤销，无数据变更"}

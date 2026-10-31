@@ -1293,7 +1293,46 @@ class App(SettingsWindowMixin):
         self.root.mainloop()
 
 
+def _缺的零件():
+    """启动自检：缺哪个关键零件就报哪个。返回缺件名单，空表=齐了。"""
+    缺 = []
+    if not HAS_PYPERCLIP:
+        缺.append("pyperclip（读剪贴板）")
+    if not HAS_KEYBOARD:
+        缺.append("keyboard（Ctrl/Alt+Q 热键）")
+    if not HAS_PYSTRAY:
+        缺.append("pystray（右下角托盘图标）")
+    if not HAS_PIL:
+        缺.append("Pillow（画图标）")
+    return 缺
+
+
+def _报错缺件(缺件):
+    """缺件时弹中文框说明缺谁，然后退出码 1。"""
+    行 = ["缺零件，启动不了："]
+    for x in 缺件:
+        行.append("· " + x)
+    行.append("")
+    行.append("请双击 run.bat 自动安装，装完再打开。")
+    try:
+        r = tk.Tk()
+        r.withdraw()
+        try:
+            messagebox.showerror("翻译小助手", chr(10).join(行))
+        finally:
+            try:
+                r.destroy()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    sys.exit(1)
+
+
 if __name__ == "__main__":
+    _缺 = _缺的零件()
+    if _缺:
+        _报错缺件(_缺)
     _acquire_singleton()
     try:
         App().run()

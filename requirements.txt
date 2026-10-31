@@ -1,5 +1,5 @@
-requests
-pyperclip
-keyboard
-pystray
-Pillow
+requests==2.32.4
+pyperclip==1.11.0
+keyboard==0.13.5
+pystray==0.19.5
+Pillow==13.0.0
