@@ -1,1 +1,1 @@
-{"level": "L2", "level_reason": "同项目内4个启动相关文件小改(run.bat/app.py/requirements.txt/README.md)，不碰翻译逻辑与对外接口，git restore可撤销，无数据变更"}
+{"level": "L2", "level_reason": "只改展示层(app位置保持+底边框线+定时器清理/tests位置回归+manual收尾),同模块可撤销,无接口与数据变更"}
