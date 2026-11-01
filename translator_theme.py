@@ -118,6 +118,39 @@ def _make_chevron_image(展开=False, 边=32):
     return ImageTk.PhotoImage(画)
 
 
+def _make_grip_image(边=32):
+    """右下角拉伸手柄：三道右下斜纹，低对比灰；偏移按边长缩放，16px 也能画。"""
+    画 = _图标底布(边)
+    d = ImageDraw.Draw(画)
+    灰 = _hex_to_rgb(ICON_FG)
+    中 = 边 // 2
+    步 = 边 / 32.0
+    for k in (round(5 * 步), round(1 * 步), round(-3 * 步)):
+        d.line(
+            [中 - 2 * 步, 中 + 6 * 步 + k, 中 + 6 * 步 + k, 中 - 2 * 步],
+            fill=灰 + (255,), width=max(1, round(2 * 步)), joint="curve",
+        )
+    return ImageTk.PhotoImage(画)
+
+
+def _make_pin_image(钉住=False, 边=32):
+    """图钉：针头圆在右上、针尖指向左下；没钉灰描边，钉住蓝填充，一眼区分。"""
+    画 = _图标底布(边)
+    d = ImageDraw.Draw(画)
+    色 = _hex_to_rgb(ACCENT) if 钉住 else _hex_to_rgb(ICON_FG)
+    中 = 边 // 2
+    头 = [中 + 1, 中 - 11, 中 + 9, 中 - 3]
+    if 钉住:
+        d.ellipse(头, fill=色 + (255,), outline=色 + (255,), width=2)
+    else:
+        d.ellipse(头, outline=色 + (255,), width=2)
+    d.line(
+        [中 + 3, 中 - 4, 中 - 6, 中 + 8],
+        fill=色 + (255,), width=2, joint="curve",
+    )
+    return ImageTk.PhotoImage(画)
+
+
 def _make_gear_image(边=32):
     """齿轮：18px 外径、6 齿、机身 r=6.5；16px/8 齿在小尺寸下会糊成一团。"""
     画 = _图标底布(边)
@@ -181,55 +214,88 @@ def _make_secondary_button_image(状态="normal", 宽=96, 高=32, 半径=8):
     return ImageTk.PhotoImage(画)
 
 
-def _make_corner_image(角, 边=13, 半径=RADIUS):
-    """圆角遮罩：角外透明、角内填白、1px EDGE 描边；超采样抗锯齿。
-
-    角 ∈ {"tl", "tr", "bl", "br"}；圆心取对应卡片内角。
-    """
-    超 = 4
-    大 = 边 * 超
-    R = 半径 * 超
-    中心 = {"tl": (大, 大), "tr": (0, 大), "bl": (大, 0), "br": (0, 0)}[角]
-    白 = Image.new("L", (大, 大), 0)
-    描 = Image.new("L", (大, 大), 0)
-    dp = ImageDraw.Draw(白)
-    dp.ellipse(
-        [中心[0] - R, 中心[1] - R, 中心[0] + R, 中心[1] + R], fill=255
-    )
-    de = ImageDraw.Draw(描)
-    de.ellipse(
-        [中心[0] - R, 中心[1] - R, 中心[0] + R, 中心[1] + R],
-        outline=255,
-        width=max(1, 超 // 2),
-    )
-    # 角内其余部分（圆心所在的整行/整列）补白：圆只盖住扇形，边缘条带要填满
+def _corner_center(角, 边, 半径):
+    """圆弧圆心（连续坐标，范围 0..边）：外角在 (0,0)/(边,0)/(0,边)/(边,边)。"""
     if 角 == "tl":
-        dp.rectangle([中心[0] - R, 中心[1], 大, 大], fill=255)
-        dp.rectangle([中心[0], 0, 大, 大], fill=255)
+        return (float(半径), float(半径))
+    if 角 == "tr":
+        return (float(边 - 半径), float(半径))
+    if 角 == "bl":
+        return (float(半径), float(边 - 半径))
+    return (float(边 - 半径), float(边 - 半径))
+
+
+def _in_cap(角, px, py, 边, 半径):
+    """像素中心是否落在需要倒圆的那块正方形里（外角边长=半径）。"""
+    if 角 == "tl":
+        return px < 半径 and py < 半径
+    if 角 == "tr":
+        return px >= 边 - 半径 and py < 半径
+    if 角 == "bl":
+        return px < 半径 and py >= 边 - 半径
+    return px >= 边 - 半径 and py >= 边 - 半径
+
+
+def _corner_kind(角, x, y, 边=13, 半径=RADIUS, 超=4):
+    """单个低分辨率像素是 transparent/white/edge（纯计算，不碰 PIL/Tk，可单测）。
+
+    圆弧：圆心见 _corner_center，半径=半径；描边半宽 0.6px，超采样抗锯齿。
+    直边：卡片边界上的那一行/列（非透明部分）固定画 1px EDGE，
+    与卡片 Frame 的 highlight 边框无缝相接。
+    """
+    import math
+
+    cx, cy = _corner_center(角, 边, 半径)
+    px = x + 0.5
+    py = y + 0.5
+    if _in_cap(角, px, py, 边, 半径):
+        命中 = 0
+        描边 = 0
+        for j in range(超):
+            for i in range(超):
+                sx = x + (i + 0.5) / 超
+                sy = y + (j + 0.5) / 超
+                d = math.hypot(sx - cx, sy - cy)
+                if abs(d - 半径) <= 0.6:
+                    描边 += 1
+                elif d < 半径:
+                    命中 += 1
+        if 描边 >= 2:
+            return "edge"
+        if 命中 >= 超 * 超 // 2:
+            return "white"
+        return "transparent"
+    # 直边描边：落在卡片边界上的行/列直接画边（cap 外不可能透明）
+    if 角 == "tl":
+        if y == 0 or x == 0:
+            return "edge"
     elif 角 == "tr":
-        dp.rectangle([0, 中心[1], 中心[0] + R, 大], fill=255)
-        dp.rectangle([0, 0, 中心[0], 大], fill=255)
+        if y == 0 or x == 边 - 1:
+            return "edge"
     elif 角 == "bl":
-        dp.rectangle([中心[0] - R, 0, 大, 中心[1] + R], fill=255)
-        dp.rectangle([中心[0], 0, 大, 大], fill=255)
+        if y == 边 - 1 or x == 0:
+            return "edge"
     else:
-        dp.rectangle([0, 0, 中心[0] + R, 中心[1] + R], fill=255)
-        dp.rectangle([0, 0, 中心[0], 大], fill=255)
-        dp.rectangle([0, 0, 大, 中心[1]], fill=255)
-    白 = 白.resize((边, 边), Image.LANCZOS)
-    描 = 描.resize((边, 边), Image.LANCZOS)
+        if y == 边 - 1 or x == 边 - 1:
+            return "edge"
+    return "white"
+
+
+def _make_corner_image(角, 边=13, 半径=RADIUS):
+    """圆角遮罩：角外透明、角内填白、圆弧 1px EDGE 描边，直边各留 1px EDGE。
+
+    角 ∈ {"tl", "tr", "bl", "br"}；直边描边与卡片 highlight 边框对齐，
+    顶部/底部/左/右四条直边由卡片自身边框提供，拐角处由本图衔接。
+    """
     画 = Image.new("RGBA", (边, 边), (0, 0, 0, 0))
-    白点 = 白.load()
-    描点 = 描.load()
     像素 = 画.load()
     边色 = _hex_to_rgb(EDGE)
-    # 二值 alpha：半透明像素盖在 KEY_COLOR 底上会调出粉边，
-    # 色键只能抠掉纯透明像素，所以覆盖过半才画，否则全透。
     for y in range(边):
         for x in range(边):
-            if 描点[x, y] >= 128:
+            类 = _corner_kind(角, x, y, 边, 半径)
+            if 类 == "edge":
                 像素[x, y] = 边色 + (255,)
-            elif 白点[x, y] >= 128:
+            elif 类 == "white":
                 像素[x, y] = (255, 255, 255, 255)
     return ImageTk.PhotoImage(画)
 
