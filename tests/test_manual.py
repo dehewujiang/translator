@@ -25,9 +25,12 @@ class 翻译按钮优先框里打的字(unittest.TestCase):
 
     def tearDown(self):
         try:
-            self.a.root.destroy()
+            self.a.on_quit()
         except Exception:
-            pass
+            try:
+                self.a.root.destroy()
+            except Exception:
+                pass
 
     def test_框里打的字不被剪贴板覆盖(self):
         self.a.read_clip = lambda: "上一次复制的一段话"

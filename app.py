@@ -66,13 +66,14 @@ except Exception:
 
 from translator_theme import (
     FONT, SRC_FONT, LBL_FONT, WORD_FONT, PHON_FONT, POS_FONT,
-    MAIN_FG, SUB_FG, FAINT_FG, LINE, CARD_BG,
+    MAIN_FG, SUB_FG, FAINT_FG, LINE, CARD_BG, EDGE,
     ACCENT, ACCENT_HOVER, HOVER_BG, KEY_COLOR,
     PAD_X, HAS_PIL, ICON_BTN, _Tip, _make_tray_image,
     _make_copy_image, _make_close_image, _make_chevron_image,
-    _make_gear_image, _make_primary_button_image, _make_corner_image,
+    _make_gear_image, _make_grip_image, _make_pin_image,
+    _make_primary_button_image, _make_corner_image,
 )
-from translator_layout import WIN_W, WIN_H, _算原文高度, _算窗口高度
+from translator_layout import WIN_W, WIN_H, _算原文高度, _算窗口高度, _钳制窗口高度
 from translator_settings_window import SettingsWindowMixin
 
 HAS_TRAY = HAS_PYSTRAY and HAS_PIL
@@ -147,6 +148,21 @@ def _release_singleton():
     _singleton_sock = None
 
 
+def _是否该藏(钉住, 可见, 配置开, 自家激活, 指针在内):
+    """自动隐藏只看五个开关：钉住/已藏/配窗开/焦点在自家/指针在内，任一成立就不藏。"""
+    if 钉住:
+        return False
+    if not 可见:
+        return False
+    if 配置开:
+        return False
+    if 自家激活:
+        return False
+    if 指针在内:
+        return False
+    return True
+
+
 class App(SettingsWindowMixin):
     def __init__(self):
         self.root = tk.Tk()
@@ -191,15 +207,29 @@ class App(SettingsWindowMixin):
         self._cancel_event = None
         self._popup_on_first_chunk = False
         self._outside_watch = False
+        self._watch_after = None
         self._mouse_was_down = False
         self._press_outside = False
         self._source_expanded = False
         self._source_compact_lines = 3
+        self._pinned = False
+        self._pin_imgs = {}
+        self.pin_btn = None
+        self._user_moved = False
+        self._resize_zone = None
+        self._bottom_line = None
+        self._grip_img = None
+        self.grip = None
+        self._manual_h = None
+        self._resizing = False
+        self._resize_y0 = None
+        self._resize_h0 = None
         self.settings_win = None
         self.tray_icon = None
 
-        # ---- 白卡片：窗口里唯一的实面，四周 8px 透明边 ----
-        self.card = tk.Frame(self.root, background=CARD_BG, bd=0, highlightthickness=0)
+        # ---- 白卡片：窗口里唯一的实面，四周 8px 透明边；1px EDGE 描边在白底上划出边界 ----
+        self.card = tk.Frame(self.root, background=CARD_BG, bd=0, highlightthickness=1,
+                             highlightbackground=EDGE, highlightcolor=EDGE)
         self.card.pack(padx=8, pady=8, fill="both", expand=True)
 
         # ---- 状态条平时不占地方：有字才冒出来，寄在顶栏左侧空位 ----
@@ -265,6 +295,31 @@ class App(SettingsWindowMixin):
         self.copy_btn.bind("<Leave>", self._tip_hide)
         self.close_btn.bind("<Enter>", lambda e: self._tip_show("关闭", e))
         self.close_btn.bind("<Leave>", self._tip_hide)
+        try:
+            self._pin_imgs = {
+                "off": _make_pin_image(False, ICON_BTN),
+                "on": _make_pin_image(True, ICON_BTN),
+            }
+        except Exception:
+            self._pin_imgs = {}
+        self.pin_btn = tk.Button(
+            self.header,
+            image=self._pin_imgs.get("off"),
+            text="" if self._pin_imgs else "📌",
+            command=self._toggle_pin,
+            relief="flat",
+            bd=0,
+            bg=CARD_BG,
+            activebackground=HOVER_BG,
+            cursor="hand2",
+            width=ICON_BTN,
+            height=ICON_BTN,
+            takefocus=0,
+            highlightthickness=0,
+        )
+        self.pin_btn.pack(side="right", padx=(0, 2))
+        self.pin_btn.bind("<Enter>", self._pin_hover_in)
+        self.pin_btn.bind("<Leave>", self._pin_hover_out)
 
         # ---- 译文（上） ----
         self.dst_text = tk.Text(
@@ -431,6 +486,7 @@ class App(SettingsWindowMixin):
         self.config_btn.bind("<Leave>", self._gear_hover_out)
 
         self._make_corners()
+        self._make_resize_zone()
 
         if not CORE_OK:
             self.dst_text.insert("1.0", "正在等待核心模块，请稍后再试（不要关闭）。")
@@ -454,33 +510,32 @@ class App(SettingsWindowMixin):
             return False
 
     def _on_focus_out(self, _event=None):
-        # 无边框窗口刚出现时焦点不在自己身上：指针还在里面就别藏
         try:
-            if self._pointer_inside():
-                return
+            指针在内 = bool(self._pointer_inside())
         except Exception:
-            pass
-        # 立刻藏起，不加延迟
+            指针在内 = True
         try:
-            if not self.root.winfo_viewable():
-                return  # 本来就藏着，不管
+            可见 = bool(self.root.winfo_viewable())
         except Exception:
             return
-        # 配置窗口开着时不藏，免得填着东西窗口没了
-        if self._is_config_open():
-            return
-        # 焦点还在主窗口里面的子控件之间转，不藏
+        焦点在内 = False
         try:
             f = self.root.focus_get()
             if f is not None:
                 try:
-                    if f.winfo_toplevel() is self.root:
-                        return
+                    焦点在内 = (f.winfo_toplevel() is self.root)
                 except Exception:
                     pass
         except Exception:
             pass
-        self.on_hide()
+        if _是否该藏(
+            getattr(self, "_pinned", False),
+            可见,
+            self._is_config_open(),
+            焦点在内,
+            指针在内,
+        ):
+            self.on_hide()
 
     # ---------- 托盘图标 ----------
     def _start_tray(self):
@@ -621,12 +676,17 @@ class App(SettingsWindowMixin):
             self._status_after = None
 
     def on_hide(self):
-        self._outside_watch = False
+        self._stop_outside_watch()
         self._tip_hide()
         self.root.withdraw()
         self._home_status()
 
     def on_quit(self):
+        self._stop_outside_watch()
+        try:
+            self.root.update()
+        except Exception:
+            pass
         self._tip_hide()
         if self._cancel_event is not None:
             self._cancel_event.set()
@@ -666,6 +726,7 @@ class App(SettingsWindowMixin):
             x = int(事件.x_root - self._drag_x)
             y = int(事件.y_root - self._drag_y)
             self.root.geometry(f"+{x}+{y}")
+            self._user_moved = True
         except Exception:
             pass
 
@@ -683,6 +744,7 @@ class App(SettingsWindowMixin):
         self._place_corners()
 
     def _place_corners(self):
+        self._place_resize()
         if not getattr(self, "_corners", None):
             return
         try:
@@ -706,6 +768,135 @@ class App(SettingsWindowMixin):
         except Exception:
             pass
 
+    def _make_resize_zone(self):
+        """底边整条可拖 + 右下角小手柄：盖在卡片底部 18px 空隙上，不碰任何按钮。
+
+        拖拽区只占到倒数第 2px，最底 1px 留给 EDGE 底边框线，
+        否则白底上底边会消失（顶/左/右边框不受影响）。
+        """
+        try:
+            self._resize_zone = tk.Frame(
+                self.root, background=CARD_BG, bd=0,
+                highlightthickness=0, cursor="size_ns",
+            )
+        except Exception:
+            self._resize_zone = None
+        try:
+            self._bottom_line = tk.Frame(
+                self.root, background=EDGE, bd=0,
+                highlightthickness=0, cursor="size_ns",
+            )
+        except Exception:
+            self._bottom_line = None
+        try:
+            self._grip_img = _make_grip_image(16)
+        except Exception:
+            self._grip_img = None
+        try:
+            self.grip = tk.Label(
+                self.root,
+                image=self._grip_img,
+                text="" if self._grip_img else "⋰",
+                font=("微软雅黑", 11),
+                foreground=SUB_FG,
+                background=CARD_BG,
+                bd=0,
+                highlightthickness=0,
+                cursor="size_ns",
+            )
+        except Exception:
+            self.grip = None
+        for 部件 in (self._resize_zone, self._bottom_line, self.grip):
+            if 部件 is None:
+                continue
+            for 序列, 回调 in (
+                ("<ButtonPress-1>", self._grip_press),
+                ("<B1-Motion>", self._grip_drag),
+                ("<ButtonRelease-1>", self._grip_release),
+            ):
+                try:
+                    部件.bind(序列, 回调)
+                except Exception:
+                    pass
+        try:
+            self.grip.bind("<Enter>", lambda e: self._tip_show("拖动调高度", e))
+            self.grip.bind("<Leave>", self._tip_hide)
+        except Exception:
+            pass
+        self._place_resize()
+
+    def _place_resize(self):
+        """底边条夹在左右圆角之间，手柄贴右下空隙；窗口变高时跟着走。"""
+        try:
+            高 = int(self._window_h)
+        except Exception:
+            return
+        宽 = WIN_W
+        try:
+            if self._resize_zone is not None:
+                self._resize_zone.place(x=8 + 13, y=高 - 8 - 12,
+                                        width=宽 - 16 - 26, height=11)
+                try:
+                    self._resize_zone.lift()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            if self._bottom_line is not None:
+                self._bottom_line.place(x=8 + 13, y=高 - 8 - 1,
+                                         width=宽 - 16 - 26, height=1)
+                try:
+                    self._bottom_line.lift()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            if self.grip is not None:
+                self.grip.place(x=宽 - 8 - 18 - 16, y=高 - 8 - 18 + 1,
+                                width=16, height=16)
+                try:
+                    self.grip.lift()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _grip_press(self, 事件):
+        try:
+            self._resizing = True
+            self._resize_y0 = float(事件.y_root)
+            self._resize_h0 = int(self._window_h)
+        except Exception:
+            self._resizing = False
+            self._resize_y0 = None
+
+    def _grip_drag(self, 事件):
+        if not self._resizing or self._resize_y0 is None or self._resize_h0 is None:
+            return
+        try:
+            屏高 = self.root.winfo_screenheight()
+            新高 = _钳制窗口高度(
+                self._resize_h0 + (float(事件.y_root) - self._resize_y0), 屏高
+            )
+            if 新高 != self._window_h:
+                self._window_h = 新高
+                self.root.geometry(f"{WIN_W}x{新高}")
+                self._place_corners()
+        except Exception:
+            pass
+
+    def _grip_release(self, _事件=None):
+        try:
+            if self._resizing:
+                self._manual_h = int(self._window_h)
+        except Exception:
+            pass
+        self._resizing = False
+        self._resize_y0 = None
+        self._resize_h0 = None
+
     def _primary_set(self, 状态):
         try:
             img = self._primary_imgs.get(状态)
@@ -719,6 +910,27 @@ class App(SettingsWindowMixin):
 
     def _primary_hover_out(self, _事件=None):
         self._primary_set("normal")
+
+    def _pin_hover_in(self, 事件):
+        try:
+            self._tip_show(
+                "取消钉住" if getattr(self, "_pinned", False) else "钉住窗口，点外面不消失",
+                事件,
+            )
+        except Exception:
+            pass
+
+    def _pin_hover_out(self, _事件=None):
+        self._tip_hide(_事件)
+
+    def _toggle_pin(self):
+        self._pinned = not getattr(self, "_pinned", False)
+        try:
+            img = self._pin_imgs.get("on" if self._pinned else "off")
+            if img is not None:
+                self.pin_btn.configure(image=img)
+        except Exception:
+            pass
 
     def _gear_hover_in(self, _事件=None):
         try:
@@ -745,6 +957,25 @@ class App(SettingsWindowMixin):
         except Exception:
             pass
 
+    def _place_keep_or_top(self):
+        """用户拖过窗口就留在原地只改高度（超屏底则上提），否则回右上角。"""
+        if getattr(self, "_user_moved", False):
+            try:
+                高 = int(self._window_h)
+                self.root.geometry(f"{WIN_W}x{高}")
+                try:
+                    屏高 = int(self.root.winfo_screenheight())
+                    if self.root.winfo_y() + 高 > 屏高:
+                        self.root.geometry(
+                            f"{WIN_W}x{高}+{self.root.winfo_x()}+{max(0, 屏高 - 高)}"
+                        )
+                except Exception:
+                    pass
+                return
+            except Exception:
+                pass
+        self._place_top_right()
+
     def _refit(self):
         # 窗口刚显示时 update_idletasks 拿不到真实宽高，必须先跑一次 update
         try:
@@ -762,7 +993,7 @@ class App(SettingsWindowMixin):
             旧高 = self._window_h
             self._ensure_fits()
             if self._window_h > 旧高:
-                self._place_top_right()
+                self._place_keep_or_top()
                 self.root.update()
         except Exception:
             pass
@@ -792,8 +1023,10 @@ class App(SettingsWindowMixin):
                 行高,
                 屏高,
             )
+            if self._manual_h is not None:
+                self._window_h = max(int(self._manual_h), int(self._window_h))
             self._ensure_fits()
-            self._place_top_right()
+            self._place_keep_or_top()
         except Exception:
             pass
         self._place_corners()
@@ -804,9 +1037,8 @@ class App(SettingsWindowMixin):
             self.root.update_idletasks()
             需要 = int(self.root.winfo_reqheight())
             屏高 = int(self.root.winfo_screenheight())
-            上限 = max(WIN_H, min(int(屏高 * 0.72), 900))
             if 需要 > self._window_h:
-                self._window_h = min(需要, 上限)
+                self._window_h = _钳制窗口高度(需要, 屏高)
         except Exception:
             pass
         self._place_corners()
@@ -858,9 +1090,18 @@ class App(SettingsWindowMixin):
             self._mouse_was_down = False
         self._press_outside = False
         try:
-            self.root.after(80, self._watch_outside_click)
+            self._watch_after = self.root.after(80, self._watch_outside_click)
         except Exception:
             self._outside_watch = False
+
+    def _stop_outside_watch(self):
+        self._outside_watch = False
+        try:
+            序号, self._watch_after = self._watch_after, None
+            if 序号 is not None:
+                self.root.after_cancel(序号)
+        except Exception:
+            pass
 
     def _watch_outside_click(self):
         if not self._outside_watch:
@@ -875,11 +1116,12 @@ class App(SettingsWindowMixin):
             if down and not self._mouse_was_down:
                 self._press_outside = not self._pointer_inside()
             if self._mouse_was_down and not down:
-                if (
-                    self._press_outside
-                    and not self._is_config_open()
-                    and not self._is_foreground()
-                    and not self._pointer_inside()
+                if self._press_outside and _是否该藏(
+                    getattr(self, "_pinned", False),
+                    True,
+                    self._is_config_open(),
+                    self._is_foreground(),
+                    self._pointer_inside(),
                 ):
                     self._outside_watch = False
                     self.on_hide()
@@ -889,14 +1131,14 @@ class App(SettingsWindowMixin):
             self._outside_watch = False
             return
         try:
-            self.root.after(80, self._watch_outside_click)
+            self._watch_after = self.root.after(80, self._watch_outside_click)
         except Exception:
             self._outside_watch = False
 
     def popup(self):
         # 直接顶出来的路径不经过 _refit：先保证窗口装得下按钮行
         self._ensure_fits()
-        self._place_top_right()
+        self._place_keep_or_top()
         try:
             if self.root.winfo_viewable():
                 if self._is_foreground():
@@ -913,7 +1155,7 @@ class App(SettingsWindowMixin):
             pass
         if self._is_foreground():
             self.root.deiconify()
-            self._place_top_right()
+            self._place_keep_or_top()
             try:
                 self.root.lift()
                 self.root.focus_force()
@@ -921,7 +1163,7 @@ class App(SettingsWindowMixin):
                 pass
         else:
             self._show_no_activate()
-            self._place_top_right()
+            self._place_keep_or_top()
             self._raise_no_activate()
         self._start_outside_watch()
 
@@ -1072,6 +1314,7 @@ class App(SettingsWindowMixin):
     def _run_translate(self, text, from_hotkey):
         self._request_id += 1
         本号 = self._request_id
+        self._manual_h = None
         if self._cancel_event is not None:
             self._cancel_event.set()
         self._cancel_event = None
