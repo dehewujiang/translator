@@ -1,0 +1,1 @@
+{"changed": ["translator_theme.py(手柄图标)", "translator_layout.py(高度钳制纯函数)", "app.py(手柄+拖拽+手动高度)", "tests/test_resize.py(5条新单测)"], "commands": ["python -m unittest tests.test_resize -v", "python -m unittest discover -s tests", "手柄与四角图片生成检查"], "exit_codes": [0, 0, 0], "note": "63条全过(58旧+5新);LSP报的错是历史残留(可选依赖告警)与过期缓存,运行时为准"}

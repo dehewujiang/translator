@@ -1,0 +1,9 @@
+红(先写测试,函数还不存在):
+tests/test_resize.py: ImportError: cannot import name '_是否该藏' from 'app'
+结论:红灯确认,测试有效.
+
+绿(实现后):
+Ran 66 tests in 0.773s OK (58 旧 + 5 拉伸 + 3 钉住判定)
+图片生成: grip16 16x16, pin灰/蓝 28x28 ok
+真窗冒烟: pin/zone/grip 三件全创建;zone x=21 w=338, grip x=338;钉住判定 True/False 正确;图钉点两次 True->False;顶栏三按钮顺序正确;on_quit 干净退出
+LSP 告警均为历史残留(可选依赖)与 None 收窄噪音,运行时为准

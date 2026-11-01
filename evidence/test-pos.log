@@ -1,0 +1,13 @@
+红(先写测试,行为还不对):
+test_拖过后弹新译文不回右上: FAIL (2156,48) != (100,100) 翻译后弹回右上,复现用户报告
+test_底边框线在拖拽区之上: ERROR AttributeError 'App' object has no attribute '_bottom_line'
+结论:两个红灯都是真问题,测试有效.
+
+绿(实现后):
+test_底边框线在拖拽区之上 ... ok
+test_拖过后弹新译文不回右上 ... ok
+test_没拖过弹新译文回右上 ... ok
+全量: Ran 69 tests OK (58旧 + 8拉伸钉住 + 3位置),输出零噪音.
+
+顺带修:全量曾有一条 Tcl 定时器报错,查到是 test_manual 收尾直接 destroy、定时器 leak 到后面的真窗测试;收尾改走 on_quit(顺带清定时器),噪音归零.
+LSP 告警均为历史残留(可选依赖)与 None 收窄噪音,运行时为准.

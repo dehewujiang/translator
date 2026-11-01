@@ -1,0 +1,14 @@
+红(先写测试,函数还不存在):
+tests/test_resize.py: ERROR "_钳制窗口高度" is unknown import symbol
+结论:红灯确认,测试有效.
+
+绿(实现后):
+test_四角镜像对称 (tests.test_resize.四角对称) ... ok
+test_外角透明内里白 (tests.test_resize.四角对称) ... ok
+test_区间内原样返回 (tests.test_resize.高度钳制) ... ok
+test_过矮钳到最小高 (tests.test_resize.高度钳制) ... ok
+test_过高钳到屏幕上限 (tests.test_resize.高度钳制) ... ok
+Ran 5 tests in 0.006s OK
+
+全量: Ran 63 tests in 1.210s OK (58 旧 + 5 新)
+手柄与四角图片生成检查: grip 32x32, corners 13x13 ok
