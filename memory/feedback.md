@@ -16,3 +16,5 @@
 14. Tk 事件不是"发了就到"：脚本里用 Win32 注入鼠标后，不调用 `update()` 就不会处理事件，会误判成"点不到"。E2E 每一步都要 pump 一次事件循环。
 15. `Listbox`/Tk 控件不支持的选项会抛 TclError 且常被 `except: pass` 吞掉，功能静默失效；断言要查真实属性（`itemcget`/`cget`），别只断言"调用没报错"。
 16. DWM 深色标题栏：`DwmSetWindowAttribute` 返回 HRESULT，失败也是 0x8007xxxx 的负数，不能无条件 break；属性 20/19 要按系统版本重试。
+17. 配置窗加控件必须测极端尺寸：正常屏截图全绿不代表没问题。768px 高 + 125% 缩放时窗口上限 643px，新加的提示词框会被 pack 挤出可视区（`winfo_ismapped()==0`，只剩 9px）。以后加/改配置窗控件，补一条"打桩 screenheight=768 再开窗，量每个控件 mapped 与高度、量底部按钮是否在窗内"的脚本。
+18. 改 core 读配置，测试必须同时改隔离方式：`translate_zh_to_en` 从固定指令改成读方案 `prompt_zh2en` 后，老测试仍假设固定默认值又读真实配置——用户一旦保存自定义提示词，全量测试就红。规则：凡是"行为开始依赖配置"，测试要么替换 `load_config`，要么把 `TRANSLATOR_CONFIG_DIR` 指到临时目录，二选一必须做。

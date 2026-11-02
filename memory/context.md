@@ -22,3 +22,6 @@
 - 译文滚动条是自绘的（Frame 轨道 + Frame 滑块），溢出才 grid，滑块拖动用 `y_root - 轨道 rooty`。
 - 拖宽热区必须在卡片内部（不透明），透明边上的热区会被色键点击穿透；拖动时锚定被拖边并夹在屏幕内。
 - 测试全离线；`config.json` 不入库；exe 在 `dist/` 不入库，分发前重打。
+- 中译英提示词按方案存 `prompt_zh2en`；`translate_zh_to_en` 读它、空则回退 `默认中译英提示词`。`_补齐方案` 在读取时补默认，磁盘要等下次保存才落盘（配置版本号仍是 2，不强制迁移）。
+- 配置窗有两个提示词框（英译中 / 中译英），都用 `<<Modified>>` 标记未保存；矮屏时 `_fit_prompt_boxes` 先收行数（最差各 1 行），不得让任一框或底部按钮被挤出可视区。
+- 测试不得读真实配置：`tests/test_zh_en.py` 替换 `translator_core.load_config`；`tests/test_zh2en_config.py` 用 `TRANSLATOR_CONFIG_DIR` 指向临时目录。

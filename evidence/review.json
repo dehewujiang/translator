@@ -1,51 +1,79 @@
 {
   "verdict": "通过",
-  "checked": [
-    "第1条 测试连接：`translator_settings_window.py` 仍复用 `translator_provider.chat`，后台线程 + `after` 回主线程，缺字段早退，测试中按钮 disabled。用最终代码重跑真实 mainloop 探针：成功显示“连接正常：模型回复「正常」”、失败显示“连接失败：钥匙无效（401）”、按钮恢复 normal；缺字段 0 次请求；未完成时销毁配置窗不崩。通过。",
-    "第2条 钥匙显隐：最终代码下真实配置窗点两次，Entry `show` 为 `*`→``→`*`，按钮文字“显示”→“隐藏”→“显示”。通过。",
-    "第3条 空状态引导：最终代码下空窗 `empty_hint` 可见；写入“翻译中，请稍等…”后自动收起且不进入 `dst_text`；点击引导焦点到原文框，无异常。通过。",
-    "第4条 滚动条：`_bar_jump` 已改用 `event.y_root - dst_bar.winfo_rooty()`。真实鼠标复验：滚到中间（yview 0.50）后抓滑块，按下不再跳顶（0.50→0.512），向下拖 96px 到 0.967；轨道点击 0.21→0.79；长内容出现、短内容收起。通过。",
-    "第5条 英文字体：原文框与词典“例英”仍使用 `EN_FONT=('Segoe UI',10)`，释义/词性/“例中”用微软雅黑。通过。",
-    "第6条 窗口宽度：热区已从透明边移进卡片内部 6px、用 `CARD_BG`；真实鼠标实测左右热区光标均为 size_we（中心为普通箭头），右拖 475→505 且右缘=1920 不越屏，左拖 505→567 且右缘 1920→1920 不动；极端拖拽宽度 950（px760）夹在屏内；最小宽 400、底栏底 497≤530；窄化长译文后高度重新贴合到 777 且未越屏。通过。",
-    "第7条 深色模式：最终代码 `TRANSLATOR_THEME=dark` 现场复拍配置窗标题栏平均亮度 43.6（d4 截图同为 43.6），主窗色键在开窗后恢复为 #FF00FE；主窗/列表/图标/四角/气泡跟随主题。`ACCENT_TEXT` 深色 #9DBBFF on #1E2227=8.36:1，`ERROR_FG` #FF9A8A on #1E2227=7.80:1；d3 词典“词性”已变浅蓝。`test_p2` 已加 `ACCENT_TEXT >= 4.5` 断言，浅色/深色两轮均过。通过。",
-    "修复项 红→绿：把 `evidence/p2-redgreen.py` 复制到临时目录执行（避免改写项目证据），六组全部复现：钥匙显隐/测试连接/对比度/空状态/滚动条均为“关掉实现→红、恢复→绿”；拖宽旧 bug 热区在透明边 475→475，热区移进卡片后 475→505。通过。",
-    "修复项 真实鼠标：`python evidence/e2e-mouse.py` 我自己连跑 3 次，均 ALL PASS（拖右 475→505、右缘 1920；拖左 505→567、右缘 1920→1920；滑块 0.00→0.21；轨道 0.21→0.79）。通过。",
-    "P0/P1 回归：`python -m unittest discover -s tests -v` → Ran 88 tests OK；`check_layout.py`、`check-round2.py`、`check-p2.py` 均 ALL PASS；DPI/只读/删除确认/关窗提醒/列表配色/四角未见回归。通过。"
-  ],
-  "missing": [],
-  "blocking": [],
-  "findings": [
-    {
-      "file": "evidence/summary.md:106",
-      "issue": "仍写“exe 重打 37,701,892 字节”，实际最终 exe 为 37,703,328 字节（build-p2.log/stat 12:04:39；协调者口径也是 37,703,328）。属陈旧数字，不影响功能与冒烟结论。",
-      "evidence": "stat dist/翻译小助手.exe = 37,703,328；evidence/build-p2.log 12:04:39 Build complete。"
-    },
-    {
-      "file": "evidence/summary.md / evidence/run-p2.json",
-      "issue": "截图口径对不上：summary 写“浅色 5 张 + 深色 4 张”，实际 `evidence/audit/` 有 8 张（01-08）；`run-p2.json` 只列 `audit-shots.py # 浅色截图 5 张`，漏列生成 06-08 的 `shot-p2.py`。属文档计数问题。",
-      "evidence": "ls evidence/audit 有 01-08 共 8 张；shot-p2.py 生成 06/07/08；run-p2.json commands 无 shot-p2.py。"
-    },
-    {
-      "file": "translator_settings_window.py:78-99",
-      "issue": "深色开窗时先摘主窗色键、`win.update()` 后再应用 DWM，存在极短瞬态：探针在 `_apply_dark_titlebar` 入口采到主窗透明边为 (255,0,254) 品红、配置窗标题栏为 (229,229,229) 浅色；恢复后主窗边正常、标题栏 43 深色。最终状态正确，但打开配置窗可能有一帧闪。",
-      "evidence": "临时探针 probe_open_flash.py：during open margin=(255,0,254), title=(229,229,229)；after margin restored, title dark。"
-    },
-    {
-      "file": "evidence/e2e-mouse.py",
-      "issue": "E2E 的滑块用例是从 yview 0.00 顶部开始拖的；上轮的关键 bug 是“滚到中间再抓滑块会跳顶”。我另写探针验证中间抓取已修（0.50→0.512→0.967），建议把该场景补进 E2E 固化。",
-      "evidence": "临时探针 probe_thumb_mid.py：mid_press=0.512 after=0.967 PASS=True。"
-    },
-    {
-      "file": "translator_theme.py:58 / translator_settings_window.py:385",
-      "issue": "使用 uxtheme 未文档化序号 135/133（SetPreferredAppMode/AllowDarkModeForWindow），未来 Windows 版本可能失效；当前失败会被 try 捕获，本机实测有效。",
-      "evidence": "代码行；本机 18363 最终标题栏变深、主窗色键恢复。"
-    }
-  ],
-  "notes": [
-    "上一轮 6 条 blocking 均已闭合：拖宽热区、拖宽锚点/夹屏、滑块坐标、深色标题栏、深色强调色、P2 红→绿。",
-    "本轮我独立重跑：88 tests OK、check_layout/check-round2/check-p2 ALL PASS、e2e-mouse 3 次 ALL PASS、p2-redgreen 六组复现、深色标题栏与 ACCENT_TEXT 对比度实采。",
-    "深色模式仍是启动时读取，运行中切系统主题需重开；宽度只记本次运行，不写配置，符合本轮说明。",
-    "浅色/深色截图均晚于最终代码保存（浅色 12:03 vs app.py 11:43/theme 11:57；深色 11:57:06 vs theme/settings 11:57:05），时间顺序正常。"
-  ],
-  "reviewed_at": "2026-11-02T12:13:13"
+  "round2": {
+    "checked": [
+      "全量单测：cd 项目根执行 python -m unittest discover -s tests -v，亲自看到 Ran 119 tests in 3.619s / OK / exit 0；本轮新增 tests/test_zh_en.py（10 条）与 tests/test_zh2en_config.py（6 条）。",
+      "关键回归（自定义配置不污染测试）：临时目录 C:/Users/24812/AppData/Local/Temp/opencode/rev2-cfg-f774d1ad 写入 v2 配置，default 方案含 prompt_zh2en=自定义中译英-REV2、prompt=自定义英译中；TRANSLATOR_CONFIG_DIR 指过去后跑全量 → Ran 119 tests / OK / exit 0。真实 %LOCALAPPDATA%\\翻译小助手\\config.json 前后 sha256 均为 FFC1A22E41DD9D092E1E83929BD040CC8C67A4039D6DA4EE12115A226E5BC841，mtime 均为 2026-11-02T11:42:23.2257172Z。",
+      "红绿：默认 Windows 环境执行 python evidence/zh2en-redgreen.py → GREEN exit 0、RED exit 1、RESULT: RED->GREEN OK、总 exit 0；RED 两条失败点 tests/test_zh_en.py:64 与 :130，AssertionError 为「你是中英翻译…默认指令」!=「自定义中译英」，即旧固定指令 vs 自定义提示词；日志 evidence/test-zh2en-redgreen.log 中 RED 段 Ran 10 tests / FAILED (failures=2)，GREEN 段 Ran 16 tests / OK。",
+      "真机脚本：python evidence/check-zh2en.py → 22 个 PASS / 0 FAIL、exit 0；阶段1 中译英框高 81px 且落在窗内；阶段2 窗口 643px（768-px(100)），两框均 mapped，中译英框 35px，测试连接/删除/保存三按钮全部 mapped 且 bottom 在窗内。",
+      "独立矮屏复核（自写临时脚本 rev2-ui.py）：SetProcessDpiAwareness(1) 后 UI_SCALE=1.25、px(100)=125；把 tk.Toplevel.winfo_screenheight 打桩为 768，重开配置窗 → 窗口高 643、reqheight 646；英译中/中译英框均 mapped、各 35px（字体 linespace=23，rows=1），两框底部 623/703 均 <= 窗底 841；三按钮 bottom=821 <= 841；24/24 PASS。",
+      "独立功能主路径（自写临时脚本 rev2-func.py）：旧 v2 配置缺 prompt_zh2en → load 后补默认、base_url/model/prompt 原样不变、磁盘 130 bytes 前后完全一致；save_profile/save_config 自定义往返、省略参数保留旧值、空串回默认；mock _call_api 后 Intent(zh) 收到自定义 prompt_zh2en、缺键/空白回退默认；Intent(text) 仍收到 prompt；Intent(word) 仍收到词典指令；12/12 PASS。",
+      "独立 UI 保存路径（自写临时脚本 rev2-ui-save.py）：界面保存自定义中译英后 load_config 落盘为自定义、英译中 prompt 未变；清空中译英保存后磁盘回默认且框内重新回填默认文字；只改英译中保存后中译英仍为默认；5/5 PASS。",
+      "读 evidence/diff-zh2en-net.patch：共 272 行、3 个 diff --git，仅 translator_core.py / translator_settings.py / translator_settings_window.py；无 contains_chinese、无 tests/test_zh_detect.py 文件改动、无 app.py 文件改动（app.py 只在 3 处未改动的模块头注释上下文中出现，行 11/72/182）。core 旧侧 line 34 为固定中译英指令，新侧 line 51 读 prompt_zh2en；settings line 82 新增默认常量、90/98-100/125-133/149-156 覆盖 schema 与两个 save 入口；window line 188-189/193-205 新增标签与框、222-267 新增 _fit_prompt_boxes、268-289 回填与保存。",
+      "测试隔离抽查：tests/test_zh_en.py:16-24 setUp 保存 C._call_api/C.load_config 并在 tearDown 恢复，所有用例用受控 lambda（line 20 显式给默认 prompt_zh2en），不读真实配置；tests/test_zh2en_config.py:20-35 用 tempfile.mkdtemp + TRANSLATOR_CONFIG_DIR，patch 旧配置路径们，tearDown 恢复环境并删目录；配合上面的自定义配置全量 119 OK，确认没有偷偷读真实 config.json。",
+      "证据时间核对：产品文件 mtime 为 13:04:26-13:08:12（UTC），evidence/test-zh2en.log 13:21:23、check-zh2en.log 13:16:38、diff-zh2en-net.patch 13:20:33、run-zh2en.json 13:23:50、summary.md 13:24:33，均晚于代码改动；本轮复核重跑后 test-zh2en-redgreen.log 为 13:34:44。",
+      "对账 summary/run-zh2en：119 条、643px/35px、RED->GREEN OK、真实配置未变这些结论与实测一致；但 check-zh2en 实际 22 项 PASS，summary 与 run-zh2en 写 21 项；run-zh2en 说 test_zh_en 新增 5 条，实际由首轮 6 条变为 10 条（+4），全量 109→119（+10）。"
+    ],
+    "missing": [],
+    "blocking": [],
+    "findings": [
+      {
+        "file": "evidence/summary.md",
+        "issue": "验收单第一行仍写旧标签「翻译要求（想让它怎么翻就怎么写）」，实际 UI 已是「英译中要求（英文进、中文出）」；用户按清单会找不到旧标签，建议改成新标签后再交付。",
+        "evidence": "summary.md 验收单第 1 行 vs translator_settings_window.py:270（我实测标签为「英译中要求（英文进、中文出）」）"
+      },
+      {
+        "file": "evidence/summary.md",
+        "issue": "真机检查实际 22 项 PASS（check-zh2en.log 共 22 个 PASS、0 FAIL），summary 与 run-zh2en 均写 21 项；数字不一致。",
+        "evidence": "evidence/check-zh2en.log:2-24（22 个 PASS）；summary.md 本轮第 2 段；run-zh2en.json commands"
+      },
+      {
+        "file": "evidence/run-zh2en.json",
+        "issue": "changed 中写 tests/test_zh_en.py「新增 5 条」，实际首轮 6 条、现在 10 条，新增 4 条；全量新增 10 条（test_zh_en +4、test_zh2en_config +6）。",
+        "evidence": "首轮 review-zh2en.json 记录 Ran 6 tests；当前 tests/test_zh_en.py 有 10 个 test_ 方法；全量 109→119"
+      },
+      {
+        "file": "evidence/diff-zh2en-net.patch",
+        "issue": "所谓「本轮净 diff」只含 3 个产品文件，未包含本轮 tests/test_zh_en.py 与 tests/test_zh2en_config.py 的改动；补丁本身不足以审计测试修复（好在测试文件在仓库可读且已独立重跑）。",
+        "evidence": "diff-zh2en-net.patch:1-272，仅 3 个 diff --git；tests/test_zh_en.py、tests/test_zh2en_config.py 在 git status 中为未跟踪/未纳入该补丁"
+      },
+      {
+        "file": "evidence/zh2en-redgreen.py",
+        "issue": "子进程 capture_output(text=True) 未显式指定 encoding；在 PYTHONIOENCODING=utf-8 环境下父进程按 GBK 解码子进程 UTF-8 输出，抛 UnicodeDecodeError，脚本输出 RESULT: RED->GREEN FAIL、exit 1；默认 Windows 环境下才 OK。建议加 encoding=\"utf-8\", errors=\"replace\"。",
+        "evidence": "我设置 PYTHONIOENCODING=utf-8 运行 → exit 1 / RESULT FAIL；去掉该环境变量 → exit 0 / RESULT OK；evidence/test-zh2en-redgreen.log"
+      },
+      {
+        "file": "translator_core.py",
+        "issue": "空内容提示从「先复制一段英文」改为「先复制要翻的内容」，不在任务卡列出的改动清单、也不在 run-zh2en changed 中；属于本轮之外的顺带改动，不影响功能，但应记录/说明。",
+        "evidence": "translator_core.py:120；diff-zh2en-net.patch 未包含该行（说明是更早改动）"
+      },
+      {
+        "file": "workspace（git status）",
+        "issue": "工作区仍有上一轮中文识别任务的未提交改动（app.py、translator_domain.py、tests/test_domain.py、tests/test_zh_detect.py），不在本轮净 diff；提交时需与本轮分开，避免把两轮混成一个提交。",
+        "evidence": "git status --porcelain；diff-zh2en-net.patch 仅 3 文件"
+      },
+      {
+        "file": "translator_settings_window.py",
+        "issue": "768px/125% 下已可用；但更小屏或更高缩放（如 150%）时 px(560) 最小高可能仍高于上限，_fit_prompt_boxes 最低只能压到各 1 行，仍可能裁切。本次未验证 150% 场景，属残留风险，建议后续用 1366x768@150% 再测一次。",
+        "evidence": "translator_settings_window.py:385-393、585-597；我实测 1.25/768 窗口 643、reqheight 646，关键控件均在窗内"
+      }
+    ],
+    "notes": [
+      "两个首轮 blocking 均已闭合：矮屏 643px 下中译英框 mapped 且 35px（>=1 行），底部三按钮完整在窗内；tests/test_zh_en.py 改为受控 load_config 后，在含自定义 prompt_zh2en 的临时配置下全量 119 条仍 OK。",
+      "功能主路径独立验证通过：自定义中译英提示词确实传给模型；留空/空白回退默认；英译中仍用 prompt；单词仍走词典指令；老 v2 配置 load 补默认且不提前改写磁盘。",
+      "真实配置未被触碰：%LOCALAPPDATA%\\翻译小助手\\config.json sha256 FFC1A22E41DD9D092E1E83929BD040CC8C67A4039D6DA4EE12115A226E5BC841、mtime 2026-11-02T11:42:23Z，复核前后一致。",
+      "按任务要求重跑 evidence/check-zh2en.py 与 evidence/zh2en-redgreen.py 时，脚本会刷新 evidence/check-zh2en.log、test-zh2en-redgreen.log 与 audit/09、10 截图；我未改产品代码、测试、配置，除 evidence/review-zh2en.json 外未手写其他 evidence 文件。",
+      "建议交付用户前先修正 summary 验收单第一行标签、21→22、run-zh2en 的「新增 5 条」→「新增 4 条」；这些是文档不一致，不影响功能，故未列为 blocking。",
+      "首轮完整 checked/missing/findings 已被本文件覆盖；关键首轮结论见 round1 与 summary「复核打回后的修复」小节。"
+    ]
+  },
+  "round1": {
+    "verdict": "打回（首轮）",
+    "blocking": [
+      "矮屏挤压：768px、125% 缩放下窗口上限 643px，中译英框 winfo_ismapped()==0、仅剩 9px，用户看不到也改不了。",
+      "测试污染：tests/test_zh_en.py 假设固定默认指令且读写真实配置；用户保存自定义 prompt_zh2en 后全量测试变红，违反测试不读写真配置。"
+    ],
+    "note": "首轮完整 checked/missing/findings 见本轮之前保存的同名文件（已被本文件覆盖）或会话记录；summary.md「复核打回后的修复」小节也记录了这两个 blocking。"
+  },
+  "reviewed_at": "2026-11-02T21:45:54"
 }
