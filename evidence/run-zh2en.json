@@ -1,0 +1,21 @@
+{
+  "task": "中译英提示词改为可配置：配置窗新增第二个提示词框，按方案保存，翻译时读取（含复核打回后的修复）",
+  "level": "L3",
+  "level_reason": "跨模块：settings 方案 schema 新增 prompt_zh2en 字段与默认值回填、settings_window 新增第二个提示词输入框与矮屏收缩策略、core 中译英改为读配置并回退默认；存档格式为向后兼容加法，不改钥匙加密与既有字段，无对外接口",
+  "changed": [
+    "translator_settings.py：新增 默认中译英提示词 常量；_默认方案/_补齐方案/_带钥匙/_写入数据/create_empty_profile 全部带 prompt_zh2en，留空回填默认；save_config 与 save_profile 追加 prompt_zh2en，None/省略=保留旧值（原位置参数顺序不变）；模块头注释磁盘格式补 prompt_zh2en",
+    "translator_settings_window.py：新增「中译英要求（中文进、英文出）」标签 + s_prompt_zh2en_text；英译中标签改为「英译中要求（英文进、中文出）」；_mark_zh2en_dirty 绑定 <<Modified>>；_fill_settings_fields 回填；_settings_save 以关键字传 prompt_zh2en；新增 _fit_prompt_boxes，窗口高度超屏幕上限时先收提示词框行数（最差各 1 行），不再挤出可视区；模块头注释更新",
+    "translator_core.py：中译英指令 改为引用 默认中译英提示词；translate_zh_to_en 读当前方案 prompt_zh2en，空则回退默认；run_intent 改用 ZH 常量分派；模块头注释改为双向",
+    "tests/test_zh_en.py：改为替换 translator_core.load_config（不读真实配置）；由首轮 6 条增至 10 条（+4：自定义透传、缺键回退、空白回退、run_intent 分派与 text/word 不受影响）",
+    "tests/test_zh2en_config.py（新增）：老 v2 配置回填且不提前改写磁盘、扁平旧配置回填、create_empty_profile 默认值、自定义往返、省略保留旧值、空串回默认",
+    "evidence/check-zh2en.py：真机配置窗检查，含 768px 矮屏场景；临时配置目录，不碰真实 config.json",
+    "evidence/zh2en-redgreen.py（新增）：旧固定指令实现下跑新测试应为红，当前实现应为绿"
+  ],
+  "commands": [
+    "python -m unittest discover -s tests -v        # 119 tests OK",
+    "python evidence/zh2en-redgreen.py              # RESULT: RED->GREEN OK",
+    "python evidence/check-zh2en.py                 # 22 项全 PASS，截图 09/10"
+  ],
+  "exit_codes": [0, 0, 0],
+  "notes": "配置版本号保持 2，不触发强制回写；老配置缺字段时由 _补齐方案 在读取时补默认，下次保存才落盘。英译中提示词与词典路径未改动。evidence/diff-zh2en-net.patch 为本轮产品文件净 diff（core 的上一轮基线由已知改动逆向还原，上一轮补丁文件编码已损坏不可用）；diff-zh2en-tests.patch 为本轮测试文件；diff-zh2en-cumulative.patch 为相对 HEAD 的两轮累计，仅供对照。空内容提示文案的通用化属上一轮附带改动，不在本轮净 diff 内。LSP basedpyright 未安装（用户此前拒绝），未做静态类型检查；单测与验收脚本均离线。遗留风险：更小屏或 150% 缩放（如 1366x768@150%）下最小高 560 仍可能高于上限，未实测。"
+}

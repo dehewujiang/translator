@@ -1,0 +1,79 @@
+{
+  "verdict": "通过",
+  "round2": {
+    "checked": [
+      "全量单测：cd 项目根执行 python -m unittest discover -s tests -v，亲自看到 Ran 119 tests in 3.619s / OK / exit 0；本轮新增 tests/test_zh_en.py（10 条）与 tests/test_zh2en_config.py（6 条）。",
+      "关键回归（自定义配置不污染测试）：临时目录 C:/Users/24812/AppData/Local/Temp/opencode/rev2-cfg-f774d1ad 写入 v2 配置，default 方案含 prompt_zh2en=自定义中译英-REV2、prompt=自定义英译中；TRANSLATOR_CONFIG_DIR 指过去后跑全量 → Ran 119 tests / OK / exit 0。真实 %LOCALAPPDATA%\\翻译小助手\\config.json 前后 sha256 均为 FFC1A22E41DD9D092E1E83929BD040CC8C67A4039D6DA4EE12115A226E5BC841，mtime 均为 2026-11-02T11:42:23.2257172Z。",
+      "红绿：默认 Windows 环境执行 python evidence/zh2en-redgreen.py → GREEN exit 0、RED exit 1、RESULT: RED->GREEN OK、总 exit 0；RED 两条失败点 tests/test_zh_en.py:64 与 :130，AssertionError 为「你是中英翻译…默认指令」!=「自定义中译英」，即旧固定指令 vs 自定义提示词；日志 evidence/test-zh2en-redgreen.log 中 RED 段 Ran 10 tests / FAILED (failures=2)，GREEN 段 Ran 16 tests / OK。",
+      "真机脚本：python evidence/check-zh2en.py → 22 个 PASS / 0 FAIL、exit 0；阶段1 中译英框高 81px 且落在窗内；阶段2 窗口 643px（768-px(100)），两框均 mapped，中译英框 35px，测试连接/删除/保存三按钮全部 mapped 且 bottom 在窗内。",
+      "独立矮屏复核（自写临时脚本 rev2-ui.py）：SetProcessDpiAwareness(1) 后 UI_SCALE=1.25、px(100)=125；把 tk.Toplevel.winfo_screenheight 打桩为 768，重开配置窗 → 窗口高 643、reqheight 646；英译中/中译英框均 mapped、各 35px（字体 linespace=23，rows=1），两框底部 623/703 均 <= 窗底 841；三按钮 bottom=821 <= 841；24/24 PASS。",
+      "独立功能主路径（自写临时脚本 rev2-func.py）：旧 v2 配置缺 prompt_zh2en → load 后补默认、base_url/model/prompt 原样不变、磁盘 130 bytes 前后完全一致；save_profile/save_config 自定义往返、省略参数保留旧值、空串回默认；mock _call_api 后 Intent(zh) 收到自定义 prompt_zh2en、缺键/空白回退默认；Intent(text) 仍收到 prompt；Intent(word) 仍收到词典指令；12/12 PASS。",
+      "独立 UI 保存路径（自写临时脚本 rev2-ui-save.py）：界面保存自定义中译英后 load_config 落盘为自定义、英译中 prompt 未变；清空中译英保存后磁盘回默认且框内重新回填默认文字；只改英译中保存后中译英仍为默认；5/5 PASS。",
+      "读 evidence/diff-zh2en-net.patch：共 272 行、3 个 diff --git，仅 translator_core.py / translator_settings.py / translator_settings_window.py；无 contains_chinese、无 tests/test_zh_detect.py 文件改动、无 app.py 文件改动（app.py 只在 3 处未改动的模块头注释上下文中出现，行 11/72/182）。core 旧侧 line 34 为固定中译英指令，新侧 line 51 读 prompt_zh2en；settings line 82 新增默认常量、90/98-100/125-133/149-156 覆盖 schema 与两个 save 入口；window line 188-189/193-205 新增标签与框、222-267 新增 _fit_prompt_boxes、268-289 回填与保存。",
+      "测试隔离抽查：tests/test_zh_en.py:16-24 setUp 保存 C._call_api/C.load_config 并在 tearDown 恢复，所有用例用受控 lambda（line 20 显式给默认 prompt_zh2en），不读真实配置；tests/test_zh2en_config.py:20-35 用 tempfile.mkdtemp + TRANSLATOR_CONFIG_DIR，patch 旧配置路径们，tearDown 恢复环境并删目录；配合上面的自定义配置全量 119 OK，确认没有偷偷读真实 config.json。",
+      "证据时间核对：产品文件 mtime 为 13:04:26-13:08:12（UTC），evidence/test-zh2en.log 13:21:23、check-zh2en.log 13:16:38、diff-zh2en-net.patch 13:20:33、run-zh2en.json 13:23:50、summary.md 13:24:33，均晚于代码改动；本轮复核重跑后 test-zh2en-redgreen.log 为 13:34:44。",
+      "对账 summary/run-zh2en：119 条、643px/35px、RED->GREEN OK、真实配置未变这些结论与实测一致；但 check-zh2en 实际 22 项 PASS，summary 与 run-zh2en 写 21 项；run-zh2en 说 test_zh_en 新增 5 条，实际由首轮 6 条变为 10 条（+4），全量 109→119（+10）。"
+    ],
+    "missing": [],
+    "blocking": [],
+    "findings": [
+      {
+        "file": "evidence/summary.md",
+        "issue": "验收单第一行仍写旧标签「翻译要求（想让它怎么翻就怎么写）」，实际 UI 已是「英译中要求（英文进、中文出）」；用户按清单会找不到旧标签，建议改成新标签后再交付。",
+        "evidence": "summary.md 验收单第 1 行 vs translator_settings_window.py:270（我实测标签为「英译中要求（英文进、中文出）」）"
+      },
+      {
+        "file": "evidence/summary.md",
+        "issue": "真机检查实际 22 项 PASS（check-zh2en.log 共 22 个 PASS、0 FAIL），summary 与 run-zh2en 均写 21 项；数字不一致。",
+        "evidence": "evidence/check-zh2en.log:2-24（22 个 PASS）；summary.md 本轮第 2 段；run-zh2en.json commands"
+      },
+      {
+        "file": "evidence/run-zh2en.json",
+        "issue": "changed 中写 tests/test_zh_en.py「新增 5 条」，实际首轮 6 条、现在 10 条，新增 4 条；全量新增 10 条（test_zh_en +4、test_zh2en_config +6）。",
+        "evidence": "首轮 review-zh2en.json 记录 Ran 6 tests；当前 tests/test_zh_en.py 有 10 个 test_ 方法；全量 109→119"
+      },
+      {
+        "file": "evidence/diff-zh2en-net.patch",
+        "issue": "所谓「本轮净 diff」只含 3 个产品文件，未包含本轮 tests/test_zh_en.py 与 tests/test_zh2en_config.py 的改动；补丁本身不足以审计测试修复（好在测试文件在仓库可读且已独立重跑）。",
+        "evidence": "diff-zh2en-net.patch:1-272，仅 3 个 diff --git；tests/test_zh_en.py、tests/test_zh2en_config.py 在 git status 中为未跟踪/未纳入该补丁"
+      },
+      {
+        "file": "evidence/zh2en-redgreen.py",
+        "issue": "子进程 capture_output(text=True) 未显式指定 encoding；在 PYTHONIOENCODING=utf-8 环境下父进程按 GBK 解码子进程 UTF-8 输出，抛 UnicodeDecodeError，脚本输出 RESULT: RED->GREEN FAIL、exit 1；默认 Windows 环境下才 OK。建议加 encoding=\"utf-8\", errors=\"replace\"。",
+        "evidence": "我设置 PYTHONIOENCODING=utf-8 运行 → exit 1 / RESULT FAIL；去掉该环境变量 → exit 0 / RESULT OK；evidence/test-zh2en-redgreen.log"
+      },
+      {
+        "file": "translator_core.py",
+        "issue": "空内容提示从「先复制一段英文」改为「先复制要翻的内容」，不在任务卡列出的改动清单、也不在 run-zh2en changed 中；属于本轮之外的顺带改动，不影响功能，但应记录/说明。",
+        "evidence": "translator_core.py:120；diff-zh2en-net.patch 未包含该行（说明是更早改动）"
+      },
+      {
+        "file": "workspace（git status）",
+        "issue": "工作区仍有上一轮中文识别任务的未提交改动（app.py、translator_domain.py、tests/test_domain.py、tests/test_zh_detect.py），不在本轮净 diff；提交时需与本轮分开，避免把两轮混成一个提交。",
+        "evidence": "git status --porcelain；diff-zh2en-net.patch 仅 3 文件"
+      },
+      {
+        "file": "translator_settings_window.py",
+        "issue": "768px/125% 下已可用；但更小屏或更高缩放（如 150%）时 px(560) 最小高可能仍高于上限，_fit_prompt_boxes 最低只能压到各 1 行，仍可能裁切。本次未验证 150% 场景，属残留风险，建议后续用 1366x768@150% 再测一次。",
+        "evidence": "translator_settings_window.py:385-393、585-597；我实测 1.25/768 窗口 643、reqheight 646，关键控件均在窗内"
+      }
+    ],
+    "notes": [
+      "两个首轮 blocking 均已闭合：矮屏 643px 下中译英框 mapped 且 35px（>=1 行），底部三按钮完整在窗内；tests/test_zh_en.py 改为受控 load_config 后，在含自定义 prompt_zh2en 的临时配置下全量 119 条仍 OK。",
+      "功能主路径独立验证通过：自定义中译英提示词确实传给模型；留空/空白回退默认；英译中仍用 prompt；单词仍走词典指令；老 v2 配置 load 补默认且不提前改写磁盘。",
+      "真实配置未被触碰：%LOCALAPPDATA%\\翻译小助手\\config.json sha256 FFC1A22E41DD9D092E1E83929BD040CC8C67A4039D6DA4EE12115A226E5BC841、mtime 2026-11-02T11:42:23Z，复核前后一致。",
+      "按任务要求重跑 evidence/check-zh2en.py 与 evidence/zh2en-redgreen.py 时，脚本会刷新 evidence/check-zh2en.log、test-zh2en-redgreen.log 与 audit/09、10 截图；我未改产品代码、测试、配置，除 evidence/review-zh2en.json 外未手写其他 evidence 文件。",
+      "建议交付用户前先修正 summary 验收单第一行标签、21→22、run-zh2en 的「新增 5 条」→「新增 4 条」；这些是文档不一致，不影响功能，故未列为 blocking。",
+      "首轮完整 checked/missing/findings 已被本文件覆盖；关键首轮结论见 round1 与 summary「复核打回后的修复」小节。"
+    ]
+  },
+  "round1": {
+    "verdict": "打回（首轮）",
+    "blocking": [
+      "矮屏挤压：768px、125% 缩放下窗口上限 643px，中译英框 winfo_ismapped()==0、仅剩 9px，用户看不到也改不了。",
+      "测试污染：tests/test_zh_en.py 假设固定默认指令且读写真实配置；用户保存自定义 prompt_zh2en 后全量测试变红，违反测试不读写真配置。"
+    ],
+    "note": "首轮完整 checked/missing/findings 见本轮之前保存的同名文件（已被本文件覆盖）或会话记录；summary.md「复核打回后的修复」小节也记录了这两个 blocking。"
+  },
+  "reviewed_at": "2026-11-02T21:45:54"
+}

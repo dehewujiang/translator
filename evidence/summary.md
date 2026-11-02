@@ -135,3 +135,40 @@
 结构变化：新增 1（`tests/test_p2.py`），AGENTS.md 状态：已更新
 
 用户决策（2026-11-02）：旧明文 `config.json` / `config.my.json` 已删除（程序从 DPAPI 加密配置正常读到两个方案的钥匙）；界面重做老验收单免验。
+
+# 收工证据 · 中译英可选提示词（2026-11-02）
+
+1. 做了什么：配置窗原来只有一条「翻译要求」，只对英译中生效；中文翻英文用的是写死在代码里的一句，用户看不见也改不了。现在每条方案多一项 `prompt_zh2en`，配置窗多一个「中译英要求（中文进、英文出）」输入框，选中方案自动回填、保存落盘；翻译时中文走这条，留空自动回填默认那句。老配置（v2 与更早的扁平格式）读取时自动补默认值，地址/钥匙/模型/英译中提示词一律不动，配置版本号不变。
+2. 验了什么：119 条单测全过（`evidence/test-zh2en.log`，本轮新增 10 条，全部走临时配置目录、不读真实配置）；`evidence/zh2en-redgreen.py` 复现「旧固定指令 → 红、当前实现 → 绿」（`evidence/test-zh2en-redgreen.log`，RESULT: RED->GREEN OK）；真机配置窗 22 项全过（两框可见、标签带方向、回填正确、保存落盘、英译中未被改；另加 768px 矮屏场景：窗口 643px 下两框仍可见可编辑、底部三按钮完整在窗内），截图 `evidence/audit/09-settings-zh2en.png` 与 `10-settings-small.png`。
+3. 还剩什么：exe 未重打，源码运行即时生效；默认中译英提示词写死为「你是中英翻译，只返回英文译文，代码和路径不要翻译，保持原样。」，想改口吻在框里改即可，留空会回到这句。
+
+### 复核打回后的修复（同日）
+
+首轮独立复核 verdict=打回，两个 blocking 已闭合：
+
+1. 矮屏挤压：新增 `_fit_prompt_boxes`，窗口高度超过屏幕上限时先收提示词框行数，最差各保留 1 行，不再出现「框被挤出可视区」（`translator_settings_window.py:382-394`、`:585-600`；实测 643px 下两框均可见）。
+2. 测试污染：`tests/test_zh_en.py` 改为受控 `load_config`，不再读真实配置；新增 `tests/test_zh2en_config.py` 覆盖老配置回填与保存语义。
+3. 顺带按用户要求把英译中标签改为「英译中要求（英文进、中文出）」，两个框方向一目了然。
+
+`evidence/diff-zh2en-net.patch` 是本轮净 diff（core 的上一轮基线按已知改动逆向还原，上一轮补丁文件编码已损坏）；`diff-zh2en-cumulative.patch` 是相对 HEAD 的两轮累计，仅供对照。
+
+## 验收单（中译英可选提示词）
+
+- [ ] 点齿轮打开配置 → 能看到两个框：「英译中要求（英文进、中文出）」和「中译英要求（中文进、英文出）」
+- [ ] 中译英那个框里已经有一句默认的话，不是空的
+- [ ] 把中译英框改成你自己的说法 → 点保存 → 复制一段中文轻点 Ctrl → 出来的英文按你的说法翻
+- [ ] 把中译英框清空 → 点保存 → 再翻中文 → 还是能翻，用的是默认那句（框里会重新出现默认文字）
+- [ ] 英译中那个框和以前一样：改它不影响中文翻英文，改中译英也不影响英文翻中文
+- [ ] 配置窗比以前高一些，底部「测试连接 / 删除 / 保存」三个按钮都在，没有被裁掉
+
+## 证据在哪（本轮）
+
+- `evidence/run-zh2en.json`：命令、退出码、改动清单
+- `evidence/test-zh2en.log`：119 条单测全量输出
+- `evidence/zh2en-redgreen.py` / `evidence/test-zh2en-redgreen.log`：本轮行为改动的红→绿记录
+- `evidence/check-zh2en.py` / `evidence/check-zh2en.log`：真机配置窗验收（含矮屏场景）
+- `evidence/audit/09-settings-zh2en.png`、`10-settings-small.png`：正常屏与 643px 矮屏截图
+- `evidence/review-zh2en.json`：独立复核裁决（首轮打回，修复后见复审）
+- `evidence/diff-zh2en-net.patch`：本轮产品文件净 diff；`diff-zh2en-tests.patch`：本轮测试文件；`diff-zh2en-cumulative.patch`：相对 HEAD 的两轮累计
+
+结构变化：无新增产品模块；新增 `evidence/check-zh2en.py`。AGENTS.md 状态：待更新（模块职责未变，配置多一字段）。

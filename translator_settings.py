@@ -3,7 +3,7 @@
 [INPUT] 用户方案（地址/模型/提示词/明文钥匙）；旧版 config.json。
 [OUTPUT] 规范化多方案数据；磁盘上钥匙是 DPAPI 密文，配置在用户目录。
 [POS] 配置层；被 translator_core 与 app.py 使用；不联网、不碰界面。
-[PROTOCOL] 磁盘格式 {"version":2,"current":...,"profiles":{名:{base_url,model,prompt,api_key_dpapi}}}。
+[PROTOCOL] 磁盘格式 {"version":2,"current":...,"profiles":{名:{base_url,model,prompt,prompt_zh2en,api_key_dpapi}}}。
 """
 
 import base64
@@ -15,6 +15,7 @@ import sys
 import time
 
 默认提示词 = "你是翻译，只返回中文译文，代码和路径不要翻译，保持原样。"
+默认中译英提示词 = "你是中英翻译，只返回英文译文，代码和路径不要翻译，保持原样。"
 默认接口地址 = "https://opencode.ai/inference/openai/v1"
 默认模型 = "deepseek-v4.1-flash"
 配置版本 = 2
@@ -138,6 +139,7 @@ def _默认方案():
         "base_url": 默认接口地址,
         "model": 默认模型,
         "prompt": 默认提示词,
+        "prompt_zh2en": 默认中译英提示词,
     }
 
 
@@ -148,6 +150,9 @@ def _补齐方案(方案):
     for 键 in ("api_key", "base_url", "model", "prompt"):
         值 = 方案.get(键, "")
         出[键] = 值.strip() if isinstance(值, str) else ("" if 值 is None else str(值))
+    值 = 方案.get("prompt_zh2en", "")
+    值 = 值.strip() if isinstance(值, str) else ("" if 值 is None else str(值))
+    出["prompt_zh2en"] = 值 if 值 else 默认中译英提示词
     return 出
 
 
@@ -166,6 +171,7 @@ def _带钥匙(方案):
             "base_url": 方案.get("base_url", ""),
             "model": 方案.get("model", ""),
             "prompt": 方案.get("prompt", ""),
+            "prompt_zh2en": 方案.get("prompt_zh2en", ""),
         }
     )
 
@@ -256,6 +262,7 @@ def _写入数据(数据):
             "base_url": 完整["base_url"],
             "model": 完整["model"],
             "prompt": 完整["prompt"],
+            "prompt_zh2en": 完整["prompt_zh2en"],
         }
         钥匙 = 完整["api_key"]
         if 钥匙:
@@ -323,13 +330,15 @@ def data_profiles(数据):
     return 数据["profiles"]
 
 
-def save_config(api_key, base_url, model, prompt=None):
+def save_config(api_key, base_url, model, prompt=None, prompt_zh2en=None):
     """保存到当前方案。prompt 不传则保留原值。"""
     数据 = load_profiles()
     当前 = 数据["current"]
     旧 = 数据["profiles"].get(当前, {})
     if prompt is None:
         prompt = 旧.get("prompt", 默认提示词)
+    if prompt_zh2en is None:
+        prompt_zh2en = 旧.get("prompt_zh2en", 默认中译英提示词)
     if base_url is None or str(base_url).strip() == "":
         base_url = 默认接口地址
     if model is None or str(model).strip() == "":
@@ -337,20 +346,22 @@ def save_config(api_key, base_url, model, prompt=None):
     if api_key is None:
         api_key = ""
     数据["profiles"][当前] = _补齐方案(
-        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt}
+        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt, "prompt_zh2en": prompt_zh2en}
     )
     _写入数据(数据)
     return dict(数据["profiles"][当前])
 
 
-def save_profile(name, api_key="", base_url="", model="", prompt=""):
+def save_profile(name, api_key="", base_url="", model="", prompt="", prompt_zh2en=None):
     """新建或更新一个方案（不切换当前）。返回存好的方案。"""
     名 = str(name or "").strip()
     if not 名:
         raise Exception("方案名字不能为空。")
     数据 = load_profiles()
+    if prompt_zh2en is None:
+        prompt_zh2en = 数据["profiles"].get(名, {}).get("prompt_zh2en", "")
     数据["profiles"][名] = _补齐方案(
-        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt}
+        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt, "prompt_zh2en": prompt_zh2en}
     )
     _写入数据(数据)
     return dict(数据["profiles"][名])
@@ -382,6 +393,7 @@ def create_empty_profile(name):
         "base_url": "",
         "model": "",
         "prompt": 默认提示词,
+        "prompt_zh2en": 默认中译英提示词,
     }
     _写入数据(数据)
     return dict(数据["profiles"][名])

@@ -1,0 +1,85 @@
+GREEN EXPECTED -> got exit=0 (OK)
+RED EXPECTED -> got exit=1, mentions-custom-prompt=True (OK)
+RESULT: RED->GREEN OK
+
+### GREEN: C:\Python313\python.exe -m unittest tests.test_zh_en ...
+返回码: 0
+
+
+test_run_intent_zh使用自定义提示词 (tests.test_zh_en.中译英.test_run_intent_zh使用自定义提示词) ... ok
+test_run_intent_zh空返回EMPTY失败 (tests.test_zh_en.中译英.test_run_intent_zh空返回EMPTY失败) ... ok
+test_run_intent_zh返回英文译文 (tests.test_zh_en.中译英.test_run_intent_zh返回英文译文) ... ok
+test_word_text路径不受影响 (tests.test_zh_en.中译英.test_word_text路径不受影响) ... ok
+test_固定指令透传并返回译文 (tests.test_zh_en.中译英.test_固定指令透传并返回译文) ... ok
+test_空失败消息不再说英文 (tests.test_zh_en.中译英.test_空失败消息不再说英文) ... ok
+test_空文本直接返回空不调接口 (tests.test_zh_en.中译英.test_空文本直接返回空不调接口) ... ok
+test_空白字符串回退默认 (tests.test_zh_en.中译英.test_空白字符串回退默认) ... ok
+test_缺省提示词回退默认 (tests.test_zh_en.中译英.test_缺省提示词回退默认) ... ok
+test_自定义提示词透传 (tests.test_zh_en.中译英.test_自定义提示词透传) ... ok
+test_保存当前方案旧位置调用保留自定义值 (tests.test_zh2en_config.中译英配置.test_保存当前方案旧位置调用保留自定义值) ... ok
+test_保存当前方案空字符串回退默认 (tests.test_zh2en_config.中译英配置.test_保存当前方案空字符串回退默认) ... ok
+test_保存方案自定义值往返且省略时保留旧值 (tests.test_zh2en_config.中译英配置.test_保存方案自定义值往返且省略时保留旧值) ... ok
+test_扁平旧配置回填默认并保留其他字段 (tests.test_zh2en_config.中译英配置.test_扁平旧配置回填默认并保留其他字段) ... ok
+test_新建空方案带默认中译英提示词 (tests.test_zh2en_config.中译英配置.test_新建空方案带默认中译英提示词) ... ok
+test_旧v2方案缺中译英提示词回填默认且磁盘不提前重写 (tests.test_zh2en_config.中译英配置.test_旧v2方案缺中译英提示词回填默认且磁盘不提前重写) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 0.464s
+
+OK
+
+
+### RED(旧固定指令行为): C:\Python313\python.exe -c import sys; sys.path.insert(0, 'D:\\00_Project\\translator')
+import translator_core
+def 旧实现(text, on_chunk=None, cancel=None):
+    if text is None or str(text).strip() == "":
+        return ""
+    return translator_core._call_api(translator_core.中译英指令, str(text), on_chunk=on_chunk, cancel=cancel)
+translator_core.translate_zh_to_en = 旧实现
+import unittest
+result = unittest.main(module=None, argv=["x", "tests.test_zh_en"], exit=False, verbosity=2)
+sys.exit(0 if result.result.wasSuccessful() else 1)
+
+返回码: 1
+
+
+test_run_intent_zh使用自定义提示词 (tests.test_zh_en.中译英.test_run_intent_zh使用自定义提示词) ... FAIL
+test_run_intent_zh空返回EMPTY失败 (tests.test_zh_en.中译英.test_run_intent_zh空返回EMPTY失败) ... ok
+test_run_intent_zh返回英文译文 (tests.test_zh_en.中译英.test_run_intent_zh返回英文译文) ... ok
+test_word_text路径不受影响 (tests.test_zh_en.中译英.test_word_text路径不受影响) ... ok
+test_固定指令透传并返回译文 (tests.test_zh_en.中译英.test_固定指令透传并返回译文) ... ok
+test_空失败消息不再说英文 (tests.test_zh_en.中译英.test_空失败消息不再说英文) ... ok
+test_空文本直接返回空不调接口 (tests.test_zh_en.中译英.test_空文本直接返回空不调接口) ... ok
+test_空白字符串回退默认 (tests.test_zh_en.中译英.test_空白字符串回退默认) ... ok
+test_缺省提示词回退默认 (tests.test_zh_en.中译英.test_缺省提示词回退默认) ... ok
+test_自定义提示词透传 (tests.test_zh_en.中译英.test_自定义提示词透传) ... FAIL
+
+======================================================================
+FAIL: test_run_intent_zh使用自定义提示词 (tests.test_zh_en.中译英.test_run_intent_zh使用自定义提示词)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\00_Project\translator\tests\test_zh_en.py", line 130, in test_run_intent_zh使用自定义提示词
+    self.assertEqual(抓到["system"], "自定义中译英")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '你是中英翻译，只返回英文译文，代码和路径不要翻译，保持原样。' != '自定义中译英'
+- 你是中英翻译，只返回英文译文，代码和路径不要翻译，保持原样。
++ 自定义中译英
+
+
+======================================================================
+FAIL: test_自定义提示词透传 (tests.test_zh_en.中译英.test_自定义提示词透传)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\00_Project\translator\tests\test_zh_en.py", line 64, in test_自定义提示词透传
+    self.assertEqual(抓到["system"], "自定义中译英")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '你是中英翻译，只返回英文译文，代码和路径不要翻译，保持原样。' != '自定义中译英'
+- 你是中英翻译，只返回英文译文，代码和路径不要翻译，保持原样。
++ 自定义中译英
+
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.002s
+
+FAILED (failures=2)
+

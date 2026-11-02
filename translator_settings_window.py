@@ -1,7 +1,7 @@
 """配置窗：左列表选方案、右详情填地址钥匙模型与提示词。
 
 [INPUT] App 实例（self：settings_win、prof_list、s_* 等状态全挂在它身上）。
-[OUTPUT] 620x480 配置小窗；保存/删除/切换直接写配置。
+[OUTPUT] 620 宽、最小 560 高的配置小窗（小屏自动收提示词框行数）；保存/删除/切换直接写配置。
 [POS] 展示层；被 app.App 混入（class App(SettingsWindowMixin)）；只读 translator_settings 与 translator_theme，不反向依赖 app。
 [PROTOCOL] 方法一字不改从 app.py 搬入；self 指调用方 App 实例。
 """
@@ -267,7 +267,7 @@ class SettingsWindowMixin:
         输入框(self.s_model_var).pack(fill="x", pady=(px(4), 0), ipady=px(4))
         提示("如 deepseek-flash，照文档抄").pack(fill="x", pady=(px(3), 0))
 
-        字段名("翻译要求（想让它怎么翻就怎么写）").pack(fill="x", pady=(px(9), 0))
+        字段名("英译中要求（英文进、中文出）").pack(fill="x", pady=(px(9), 0))
         self.s_prompt_text = tk.Text(
             body, height=4, width=1, font=SRC_FONT, wrap="word",
             relief="flat", bd=0, highlightthickness=1,
@@ -277,6 +277,17 @@ class SettingsWindowMixin:
         )
         self.s_prompt_text.pack(fill="both", expand=True, pady=(px(4), 0))
 
+        字段名("中译英要求（中文进、英文出）").pack(fill="x", pady=(px(9), 0))
+        self.s_prompt_zh2en_text = tk.Text(
+            body, height=3, width=1, font=SRC_FONT, wrap="word",
+            relief="flat", bd=0, highlightthickness=1,
+            highlightbackground=EDGE, highlightcolor=ACCENT,
+            bg=CARD_BG, fg=MAIN_FG, insertbackground=MAIN_FG,
+            padx=px(6), pady=px(4),
+        )
+        self.s_prompt_zh2en_text.pack(fill="both", expand=True, pady=(px(4), 0))
+        提示("留空就用默认：只返回英文译文，代码和路径保持原样").pack(fill="x", pady=(px(3), 0))
+
         for _变量 in (self.s_url_var, self.s_key_var, self.s_model_var):
             try:
                 _变量.trace_add("write", self._mark_dirty)
@@ -284,6 +295,10 @@ class SettingsWindowMixin:
                 pass
         try:
             self.s_prompt_text.bind("<<Modified>>", self._mark_prompt_dirty)
+        except Exception:
+            pass
+        try:
+            self.s_prompt_zh2en_text.bind("<<Modified>>", self._mark_zh2en_dirty)
         except Exception:
             pass
 
@@ -366,8 +381,14 @@ class SettingsWindowMixin:
 
         try:
             win.update_idletasks()
-            高 = max(px(470), win.winfo_reqheight())
-            高 = min(高, win.winfo_screenheight() - px(100))
+            需要 = win.winfo_reqheight()
+            上限 = win.winfo_screenheight() - px(100)
+            if 需要 > 上限:
+                self._fit_prompt_boxes(win, 上限)
+                win.update_idletasks()
+                需要 = win.winfo_reqheight()
+            高 = max(px(560), 需要)
+            高 = min(高, 上限)
             win.geometry(f"{px(620)}x{高}")
         except Exception:
             pass
@@ -552,6 +573,28 @@ class SettingsWindowMixin:
             pass
         self._mark_dirty()
 
+    def _mark_zh2en_dirty(self, _e=None):
+        try:
+            if not self.s_prompt_zh2en_text.edit_modified():
+                return
+            self.s_prompt_zh2en_text.edit_modified(False)
+        except Exception:
+            pass
+        self._mark_dirty()
+
+    def _fit_prompt_boxes(self, win, 可用高):
+        """小屏时先收提示词框行数：宁可少显示几行，也不让新加的中译英框被挤出可视区。"""
+        try:
+            框们 = [self.s_prompt_text, self.s_prompt_zh2en_text]
+            while win.winfo_reqheight() > 可用高:
+                最高 = max(框们, key=lambda w: int(w.cget("height")))
+                if int(最高.cget("height")) <= 1:
+                    break
+                最高.configure(height=int(最高.cget("height")) - 1)
+                win.update_idletasks()
+        except Exception:
+            pass
+
     def _fill_settings_fields(self):
         name = (self._selected_profile_name() or "").strip()
         if not name:
@@ -570,8 +613,14 @@ class SettingsWindowMixin:
             self.s_model_var.set(prof.get("model", ""))
             self.s_prompt_text.delete("1.0", "end")
             self.s_prompt_text.insert("1.0", prof.get("prompt", ""))
+            self.s_prompt_zh2en_text.delete("1.0", "end")
+            self.s_prompt_zh2en_text.insert("1.0", prof.get("prompt_zh2en", ""))
             try:
                 self.s_prompt_text.edit_modified(False)
+            except Exception:
+                pass
+            try:
+                self.s_prompt_zh2en_text.edit_modified(False)
             except Exception:
                 pass
             self._s_dirty = False
@@ -618,6 +667,7 @@ class SettingsWindowMixin:
                 url,
                 model,
                 self.s_prompt_text.get("1.0", "end").strip(),
+                prompt_zh2en=self.s_prompt_zh2en_text.get("1.0", "end").strip(),
             )
             switch_profile(name)
             self._refresh_settings_list(select_name=name)

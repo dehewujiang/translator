@@ -37,7 +37,7 @@ class 词句判定测试(unittest.TestCase):
         self.assertEqual(build_intent("123").kind, "text")
 
     def test_中文不是单词(self):
-        self.assertEqual(build_intent("中文").kind, "text")
+        self.assertEqual(build_intent("中文").kind, "zh")
 
     def test_单个字母不算单词(self):
         self.assertEqual(build_intent("a").kind, "text")

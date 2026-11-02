@@ -3,7 +3,7 @@
 [INPUT] 纯文本（来自剪贴板/输入框）；HTTP 状态码（来自 translator_core）。
 [OUTPUT] Intent / Translation / Definition / Failure 四种数据结构。
 [POS] 最底层；被 translator_core 与 app.py 依赖；不 import 本项目任何模块。
-[PROTOCOL] Intent.kind 只有 "word" | "text"；Failure.kind 见 4.3 分类表。
+[PROTOCOL] Intent.kind 只有 "word" | "text" | "zh"（"zh" = 中译英）；Failure.kind 见 4.3 分类表。
 """
 
 from dataclasses import dataclass, field
@@ -11,6 +11,7 @@ from typing import Any
 
 WORD = "word"
 TEXT = "text"
+ZH = "zh"
 
 # 失败分类：界面按这个决定给什么提示，不解析错误文字
 CONFIG = "config"
@@ -77,9 +78,22 @@ def is_single_word(text) -> bool:
     return 2 <= len(片段) <= 30
 
 
+def contains_chinese(text) -> bool:
+    """有没有中文：任一字符落在常用区或扩展A区即算。"""
+    if not text:
+        return False
+    for 字 in str(text):
+        码 = ord(字)
+        if 0x4E00 <= 码 <= 0x9FFF or 0x3400 <= 码 <= 0x4DBF:
+            return True
+    return False
+
+
 def build_intent(text) -> Intent:
     """把原文变成意图；词句判断只在这里做一次。"""
     原文 = str(text or "").strip()
+    if contains_chinese(原文):
+        return Intent(ZH, 原文)
     return Intent(WORD if is_single_word(原文) else TEXT, 原文)
 
 

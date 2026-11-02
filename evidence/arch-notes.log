@@ -18,3 +18,10 @@
     ??  tests/test_settings_guard.py
     ??  tests/test_settings_list.py
     ??  translator_scale.py
+2026-11-02T20:07:40	结构变化：
+    ??  tests/test_zh_detect.py
+    ??  tests/test_zh_en.py
+2026-11-02T21:26:25	结构变化：
+    ??  tests/test_zh2en_config.py
+    ??  tests/test_zh_detect.py
+    ??  tests/test_zh_en.py

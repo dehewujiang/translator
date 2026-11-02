@@ -1,0 +1,292 @@
+diff --git a/translator_core.py b/translator_core.py
+index 4bbb153..821fcd7 100644
+--- a/translator_core.py
++++ b/translator_core.py
+@@ -1,5 +1,5 @@
+-"""翻译核心：英文到中文的后端单元。
+-[INPUT] 英文文本 + 当前方案（由 translator_settings 读取）。
++"""翻译核心：英文到中文与中文到英文的后端单元。
++[INPUT] 英文/中文文本 + 当前方案（由 translator_settings 读取）。
+ [OUTPUT] 译文 / 词典 / 类型化 Failure；界面只经 run_intent 进入。
+ [POS] 能力层：被 app.py 使用；向上不认识界面，向下依赖 domain/provider/settings。
+ [PROTOCOL] 通过 translator_provider 调 OpenAI 兼容接口；配置迁移与加密在 translator_settings。
+@@ -12,6 +12,7 @@ from translator_domain import (
+     EMPTY,
+     PARSE,
+     WORD,
++    ZH,
+     Definition,
+     Failure,
+     Intent,
+@@ -20,7 +21,7 @@ from translator_domain import (
+     is_single_word,
+ )
+ from translator_provider import chat as _驱动对话
+-from translator_settings import 默认接口地址, 默认模型, 默认提示词, load_config
++from translator_settings import 默认中译英提示词, 默认接口地址, 默认模型, 默认提示词, load_config
+ 
+ 
+ def _整理接口地址(地址):
+@@ -58,7 +59,7 @@ def _call_api(系统提示, 用户内容, on_chunk=None, cancel=None):
+     "整个单词至少给3个例句，每个例句都要有中文；例句短而常用。"
+ )
+ 
+-中译英指令 = "你是中英翻译，只返回英文译文，代码和路径不要翻译，保持原样。"
++中译英指令 = 默认中译英提示词
+ 
+ 
+ def lookup_word(word) -> Definition:
+@@ -102,12 +103,14 @@ def translate_en_to_zh(text, on_chunk=None, cancel=None):
+ 
+ 
+ def translate_zh_to_en(text, on_chunk=None, cancel=None):
+-    """把中文翻译成英文，只返回英文译文（固定中译英指令，不用用户 EN 提示词）。"""
++    """把中文翻译成英文，只返回英文译文（提示词来自当前方案的 prompt_zh2en，空时回退默认）。"""
+     # 空文本直接返回空，不调用接口
+     if text is None or str(text).strip() == "":
+         return ""
+     原文 = str(text)
+-    return _call_api(中译英指令, 原文, on_chunk=on_chunk, cancel=cancel)
++    配置 = load_config()
++    提示词 = str(配置.get("prompt_zh2en", "") or "").strip() or 中译英指令
++    return _call_api(提示词, 原文, on_chunk=on_chunk, cancel=cancel)
+ 
+ 
+ def run_intent(意图: Intent, on_chunk=None, cancel=None):
+@@ -118,7 +121,7 @@ def run_intent(意图: Intent, on_chunk=None, cancel=None):
+     try:
+         if getattr(意图, "kind", "") == WORD:
+             return lookup_word(文本)
+-        if getattr(意图, "kind", "") == "zh":
++        if getattr(意图, "kind", "") == ZH:
+             return Translation(translate_zh_to_en(文本, on_chunk=on_chunk, cancel=cancel))
+         return Translation(translate_en_to_zh(文本, on_chunk=on_chunk, cancel=cancel))
+     except Failure as 失败:
+diff --git a/translator_settings.py b/translator_settings.py
+index e9e7948..c810afe 100644
+--- a/translator_settings.py
++++ b/translator_settings.py
+@@ -3,7 +3,7 @@
+ [INPUT] 用户方案（地址/模型/提示词/明文钥匙）；旧版 config.json。
+ [OUTPUT] 规范化多方案数据；磁盘上钥匙是 DPAPI 密文，配置在用户目录。
+ [POS] 配置层；被 translator_core 与 app.py 使用；不联网、不碰界面。
+-[PROTOCOL] 磁盘格式 {"version":2,"current":...,"profiles":{名:{base_url,model,prompt,api_key_dpapi}}}。
++[PROTOCOL] 磁盘格式 {"version":2,"current":...,"profiles":{名:{base_url,model,prompt,prompt_zh2en,api_key_dpapi}}}。
+ """
+ 
+ import base64
+@@ -15,6 +15,7 @@ import sys
+ import time
+ 
+ 默认提示词 = "你是翻译，只返回中文译文，代码和路径不要翻译，保持原样。"
++默认中译英提示词 = "你是中英翻译，只返回英文译文，代码和路径不要翻译，保持原样。"
+ 默认接口地址 = "https://opencode.ai/inference/openai/v1"
+ 默认模型 = "deepseek-v4.1-flash"
+ 配置版本 = 2
+@@ -138,6 +139,7 @@ def _默认方案():
+         "base_url": 默认接口地址,
+         "model": 默认模型,
+         "prompt": 默认提示词,
++        "prompt_zh2en": 默认中译英提示词,
+     }
+ 
+ 
+@@ -148,6 +150,9 @@ def _补齐方案(方案):
+     for 键 in ("api_key", "base_url", "model", "prompt"):
+         值 = 方案.get(键, "")
+         出[键] = 值.strip() if isinstance(值, str) else ("" if 值 is None else str(值))
++    值 = 方案.get("prompt_zh2en", "")
++    值 = 值.strip() if isinstance(值, str) else ("" if 值 is None else str(值))
++    出["prompt_zh2en"] = 值 if 值 else 默认中译英提示词
+     return 出
+ 
+ 
+@@ -166,6 +171,7 @@ def _带钥匙(方案):
+             "base_url": 方案.get("base_url", ""),
+             "model": 方案.get("model", ""),
+             "prompt": 方案.get("prompt", ""),
++            "prompt_zh2en": 方案.get("prompt_zh2en", ""),
+         }
+     )
+ 
+@@ -256,6 +262,7 @@ def _写入数据(数据):
+             "base_url": 完整["base_url"],
+             "model": 完整["model"],
+             "prompt": 完整["prompt"],
++            "prompt_zh2en": 完整["prompt_zh2en"],
+         }
+         钥匙 = 完整["api_key"]
+         if 钥匙:
+@@ -323,13 +330,15 @@ def data_profiles(数据):
+     return 数据["profiles"]
+ 
+ 
+-def save_config(api_key, base_url, model, prompt=None):
++def save_config(api_key, base_url, model, prompt=None, prompt_zh2en=None):
+     """保存到当前方案。prompt 不传则保留原值。"""
+     数据 = load_profiles()
+     当前 = 数据["current"]
+     旧 = 数据["profiles"].get(当前, {})
+     if prompt is None:
+         prompt = 旧.get("prompt", 默认提示词)
++    if prompt_zh2en is None:
++        prompt_zh2en = 旧.get("prompt_zh2en", 默认中译英提示词)
+     if base_url is None or str(base_url).strip() == "":
+         base_url = 默认接口地址
+     if model is None or str(model).strip() == "":
+@@ -337,20 +346,22 @@ def save_config(api_key, base_url, model, prompt=None):
+     if api_key is None:
+         api_key = ""
+     数据["profiles"][当前] = _补齐方案(
+-        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt}
++        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt, "prompt_zh2en": prompt_zh2en}
+     )
+     _写入数据(数据)
+     return dict(数据["profiles"][当前])
+ 
+ 
+-def save_profile(name, api_key="", base_url="", model="", prompt=""):
++def save_profile(name, api_key="", base_url="", model="", prompt="", prompt_zh2en=None):
+     """新建或更新一个方案（不切换当前）。返回存好的方案。"""
+     名 = str(name or "").strip()
+     if not 名:
+         raise Exception("方案名字不能为空。")
+     数据 = load_profiles()
++    if prompt_zh2en is None:
++        prompt_zh2en = 数据["profiles"].get(名, {}).get("prompt_zh2en", "")
+     数据["profiles"][名] = _补齐方案(
+-        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt}
++        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt, "prompt_zh2en": prompt_zh2en}
+     )
+     _写入数据(数据)
+     return dict(数据["profiles"][名])
+@@ -382,6 +393,7 @@ def create_empty_profile(name):
+         "base_url": "",
+         "model": "",
+         "prompt": 默认提示词,
++        "prompt_zh2en": 默认中译英提示词,
+     }
+     _写入数据(数据)
+     return dict(数据["profiles"][名])
+diff --git a/translator_settings_window.py b/translator_settings_window.py
+index 07cfa1e..0bb5e4c 100644
+--- a/translator_settings_window.py
++++ b/translator_settings_window.py
+@@ -1,7 +1,7 @@
+ """配置窗：左列表选方案、右详情填地址钥匙模型与提示词。
+ 
+ [INPUT] App 实例（self：settings_win、prof_list、s_* 等状态全挂在它身上）。
+-[OUTPUT] 620x480 配置小窗；保存/删除/切换直接写配置。
++[OUTPUT] 620 宽、最小 560 高的配置小窗（小屏自动收提示词框行数）；保存/删除/切换直接写配置。
+ [POS] 展示层；被 app.App 混入（class App(SettingsWindowMixin)）；只读 translator_settings 与 translator_theme，不反向依赖 app。
+ [PROTOCOL] 方法一字不改从 app.py 搬入；self 指调用方 App 实例。
+ """
+@@ -267,7 +267,7 @@ class SettingsWindowMixin:
+         输入框(self.s_model_var).pack(fill="x", pady=(px(4), 0), ipady=px(4))
+         提示("如 deepseek-flash，照文档抄").pack(fill="x", pady=(px(3), 0))
+ 
+-        字段名("翻译要求（想让它怎么翻就怎么写）").pack(fill="x", pady=(px(9), 0))
++        字段名("英译中要求（英文进、中文出）").pack(fill="x", pady=(px(9), 0))
+         self.s_prompt_text = tk.Text(
+             body, height=4, width=1, font=SRC_FONT, wrap="word",
+             relief="flat", bd=0, highlightthickness=1,
+@@ -277,6 +277,17 @@ class SettingsWindowMixin:
+         )
+         self.s_prompt_text.pack(fill="both", expand=True, pady=(px(4), 0))
+ 
++        字段名("中译英要求（中文进、英文出）").pack(fill="x", pady=(px(9), 0))
++        self.s_prompt_zh2en_text = tk.Text(
++            body, height=3, width=1, font=SRC_FONT, wrap="word",
++            relief="flat", bd=0, highlightthickness=1,
++            highlightbackground=EDGE, highlightcolor=ACCENT,
++            bg=CARD_BG, fg=MAIN_FG, insertbackground=MAIN_FG,
++            padx=px(6), pady=px(4),
++        )
++        self.s_prompt_zh2en_text.pack(fill="both", expand=True, pady=(px(4), 0))
++        提示("留空就用默认：只返回英文译文，代码和路径保持原样").pack(fill="x", pady=(px(3), 0))
++
+         for _变量 in (self.s_url_var, self.s_key_var, self.s_model_var):
+             try:
+                 _变量.trace_add("write", self._mark_dirty)
+@@ -286,6 +297,10 @@ class SettingsWindowMixin:
+             self.s_prompt_text.bind("<<Modified>>", self._mark_prompt_dirty)
+         except Exception:
+             pass
++        try:
++            self.s_prompt_zh2en_text.bind("<<Modified>>", self._mark_zh2en_dirty)
++        except Exception:
++            pass
+ 
+         try:
+             self._s_save_imgs = {
+@@ -366,8 +381,14 @@ class SettingsWindowMixin:
+ 
+         try:
+             win.update_idletasks()
+-            高 = max(px(470), win.winfo_reqheight())
+-            高 = min(高, win.winfo_screenheight() - px(100))
++            需要 = win.winfo_reqheight()
++            上限 = win.winfo_screenheight() - px(100)
++            if 需要 > 上限:
++                self._fit_prompt_boxes(win, 上限)
++                win.update_idletasks()
++                需要 = win.winfo_reqheight()
++            高 = max(px(560), 需要)
++            高 = min(高, 上限)
+             win.geometry(f"{px(620)}x{高}")
+         except Exception:
+             pass
+@@ -552,6 +573,28 @@ class SettingsWindowMixin:
+             pass
+         self._mark_dirty()
+ 
++    def _mark_zh2en_dirty(self, _e=None):
++        try:
++            if not self.s_prompt_zh2en_text.edit_modified():
++                return
++            self.s_prompt_zh2en_text.edit_modified(False)
++        except Exception:
++            pass
++        self._mark_dirty()
++
++    def _fit_prompt_boxes(self, win, 可用高):
++        """小屏时先收提示词框行数：宁可少显示几行，也不让新加的中译英框被挤出可视区。"""
++        try:
++            框们 = [self.s_prompt_text, self.s_prompt_zh2en_text]
++            while win.winfo_reqheight() > 可用高:
++                最高 = max(框们, key=lambda w: int(w.cget("height")))
++                if int(最高.cget("height")) <= 1:
++                    break
++                最高.configure(height=int(最高.cget("height")) - 1)
++                win.update_idletasks()
++        except Exception:
++            pass
++
+     def _fill_settings_fields(self):
+         name = (self._selected_profile_name() or "").strip()
+         if not name:
+@@ -570,10 +613,16 @@ class SettingsWindowMixin:
+             self.s_model_var.set(prof.get("model", ""))
+             self.s_prompt_text.delete("1.0", "end")
+             self.s_prompt_text.insert("1.0", prof.get("prompt", ""))
++            self.s_prompt_zh2en_text.delete("1.0", "end")
++            self.s_prompt_zh2en_text.insert("1.0", prof.get("prompt_zh2en", ""))
+             try:
+                 self.s_prompt_text.edit_modified(False)
+             except Exception:
+                 pass
++            try:
++                self.s_prompt_zh2en_text.edit_modified(False)
++            except Exception:
++                pass
+             self._s_dirty = False
+         finally:
+             self._refreshing_fields = False
+@@ -618,6 +667,7 @@ class SettingsWindowMixin:
+                 url,
+                 model,
+                 self.s_prompt_text.get("1.0", "end").strip(),
++                prompt_zh2en=self.s_prompt_zh2en_text.get("1.0", "end").strip(),
+             )
+             switch_profile(name)
+             self._refresh_settings_list(select_name=name)

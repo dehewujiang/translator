@@ -1,0 +1,298 @@
+diff --git a/tests/test_zh_en.py b/tests/test_zh_en.py
+new file mode 100644
+index 0000000..1bd9891
+--- /dev/null
++++ b/tests/test_zh_en.py
+@@ -0,0 +1,177 @@
++"""中译英通道离线测试：mock _call_api，零网络；不读真实配置。
++
++[INPUT] 受控 load_config（setUp 注入）+ 假 _call_api；不读真实 config.json。
++[OUTPUT] unittest 断言；覆盖自定义提示词、缺省/空白回退默认、run_intent 分派。
++[POS] 守护 translator_core.translate_zh_to_en 与 run_intent 的 zh 分支。
++[PROTOCOL] 运行：python -m unittest tests.test_zh_en -v
++"""
++import json
++import unittest
++
++import translator_core as C
++from translator_domain import EMPTY, Failure, Intent, Translation
++
++
++class 中译英(unittest.TestCase):
++    def setUp(self):
++        self._原接口 = C._call_api
++        self._原读配置 = C.load_config
++        # 不读、不改真实的 config.json；默认受控配置显式给出默认中译英指令
++        C.load_config = lambda: {"prompt": "受控英译中提示", "prompt_zh2en": C.中译英指令}
++
++    def tearDown(self):
++        C._call_api = self._原接口
++        C.load_config = self._原读配置
++
++    def test_固定指令透传并返回译文(self):
++        # 受控配置：prompt_zh2en 为默认中译英指令
++        self.assertEqual(C.load_config()["prompt_zh2en"], C.中译英指令)
++        抓到 = {}
++
++        def 假调用(系统提示, 用户内容, on_chunk=None, cancel=None):
++            抓到["system"] = 系统提示
++            抓到["user"] = 用户内容
++            抓到["on_chunk"] = on_chunk
++            抓到["cancel"] = cancel
++            return "Hello"
++
++        C._call_api = 假调用
++        try:
++            结果 = C.translate_zh_to_en("你好", on_chunk="cb", cancel="cc")
++        finally:
++            C._call_api = self._原接口
++        self.assertEqual(结果, "Hello")
++        self.assertEqual(抓到["user"], "你好")
++        self.assertEqual(抓到["system"], C.中译英指令)
++        self.assertEqual(抓到["on_chunk"], "cb")
++        self.assertEqual(抓到["cancel"], "cc")
++
++    def test_自定义提示词透传(self):
++        C.load_config = lambda: {"prompt": "中->英", "prompt_zh2en": "自定义中译英"}
++        抓到 = {}
++
++        def 假调用(系统提示, 用户内容, on_chunk=None, cancel=None):
++            抓到["system"] = 系统提示
++            抓到["user"] = 用户内容
++            return "Hello"
++
++        C._call_api = 假调用
++        try:
++            结果 = C.translate_zh_to_en("你好")
++        finally:
++            C._call_api = self._原接口
++        self.assertEqual(结果, "Hello")
++        self.assertEqual(抓到["system"], "自定义中译英")
++        self.assertEqual(抓到["user"], "你好")
++
++    def test_缺省提示词回退默认(self):
++        # 受控配置：缺 prompt_zh2en 键 -> 用 shipped 默认
++        C.load_config = lambda: {"prompt": "中->英"}
++        抓到 = {}
++        C._call_api = lambda 系统提示, 用户内容, on_chunk=None, cancel=None: (
++            抓到.setdefault("system", 系统提示),
++            "Hello",
++        )[1]
++        try:
++            C.translate_zh_to_en("你好")
++        finally:
++            C._call_api = self._原接口
++        self.assertEqual(抓到["system"], C.中译英指令)
++
++    def test_空白字符串回退默认(self):
++        C.load_config = lambda: {"prompt_zh2en": "   "}
++        抓到 = {}
++        C._call_api = lambda 系统提示, 用户内容, on_chunk=None, cancel=None: (
++            抓到.setdefault("system", 系统提示),
++            "Hello",
++        )[1]
++        try:
++            C.translate_zh_to_en("你好")
++        finally:
++            C._call_api = self._原接口
++        self.assertEqual(抓到["system"], C.中译英指令)
++
++    def test_空文本直接返回空不调接口(self):
++        被调 = []
++        C._call_api = lambda *a, **k: (被调.append(1), "x")[1]
++        try:
++            self.assertEqual(C.translate_zh_to_en("   "), "")
++            self.assertEqual(C.translate_zh_to_en(""), "")
++            self.assertEqual(C.translate_zh_to_en(None), "")
++        finally:
++            C._call_api = self._原接口
++        self.assertEqual(被调, [])
++
++    def test_run_intent_zh返回英文译文(self):
++        C._call_api = lambda *a, **k: "Hello"
++        try:
++            结果 = C.run_intent(Intent("zh", "你好"))
++        finally:
++            C._call_api = self._原接口
++        self.assertIsInstance(结果, Translation)
++        self.assertEqual(结果.text, "Hello")
++
++    def test_run_intent_zh使用自定义提示词(self):
++        C.load_config = lambda: {"prompt": "中->英", "prompt_zh2en": "自定义中译英"}
++        抓到 = {}
++
++        def 假调用(系统提示, 用户内容, on_chunk=None, cancel=None):
++            抓到["system"] = 系统提示
++            抓到["user"] = 用户内容
++            return "Hello"
++
++        C._call_api = 假调用
++        try:
++            结果 = C.run_intent(Intent("zh", "你好"))
++        finally:
++            C._call_api = self._原接口
++        self.assertIsInstance(结果, Translation)
++        self.assertEqual(结果.text, "Hello")
++        self.assertEqual(抓到["system"], "自定义中译英")
++        self.assertEqual(抓到["user"], "你好")
++
++    def test_run_intent_zh空返回EMPTY失败(self):
++        结果 = C.run_intent(Intent("zh", "   "))
++        self.assertIsInstance(结果, Failure)
++        self.assertEqual(结果.kind, EMPTY)
++
++    def test_空失败消息不再说英文(self):
++        结果 = C.run_intent(Intent("zh", ""))
++        self.assertIsInstance(结果, Failure)
++        self.assertEqual(结果.kind, EMPTY)
++        self.assertNotIn("英文", 结果.message)
++
++    def test_word_text路径不受影响(self):
++        # 受控配置：text 走 prompt，word 走单词指令（不受 prompt_zh2en 影响）
++        C.load_config = lambda: {"prompt": "英译中自定义", "prompt_zh2en": "中译英自定义"}
++        抓到 = {}
++
++        def 假调用(系统提示, 用户内容, on_chunk=None, cancel=None):
++            if 系统提示 == C.单词指令:
++                return json.dumps({
++                    "word": "hi",
++                    "uk": "/haɪ/",
++                    "us": "/haɪ/",
++                    "senses": [{"pos": "int.", "defs": ["你好"],
++                                "examples": [{"en": "Hi!", "zh": "你好！"}]}],
++                })
++            抓到[用户内容] = 系统提示
++            return "你好"
++
++        C._call_api = 假调用
++        try:
++            词 = C.run_intent(Intent("word", "hi"))
++            文 = C.run_intent(Intent("text", "hello world"))
++        finally:
++            C._call_api = self._原接口
++        self.assertEqual(词.word, "hi")
++        self.assertIsInstance(文, Translation)
++        self.assertEqual(文.text, "你好")
++        # Intent("text") 仍用 prompt
++        self.assertEqual(抓到.get("hello world"), "英译中自定义")
++        # Intent("word") 仍用单词指令
++        self.assertNotIn("中译英自定义", 抓到.values())
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/test_zh2en_config.py b/tests/test_zh2en_config.py
+new file mode 100644
+index 0000000..15cc870
+--- /dev/null
++++ b/tests/test_zh2en_config.py
+@@ -0,0 +1,109 @@
++"""中译英配置层离线测试：只用临时目录，不读写真配置，不联网。
++
++[INPUT] 临时 TRANSLATOR_CONFIG_DIR 下的手写 config.json（旧 v2 / 扁平旧格式）。
++[OUTPUT] unittest 断言；覆盖旧配置回填默认中译英提示词、磁盘不提前重写、保存往返。
++[POS] 守护 translator_settings 的 prompt_zh2en 磁盘契约与回填逻辑。
++[PROTOCOL] 运行：python -m unittest tests.test_zh2en_config -v
++"""
++
++import json
++import os
++import shutil
++import tempfile
++import unittest
++from unittest import mock
++
++import translator_settings as 设置
++
++
++class 中译英配置(unittest.TestCase):
++    def setUp(self):
++        self._旧值 = os.environ.get("TRANSLATOR_CONFIG_DIR")
++        self.临时目录 = tempfile.mkdtemp()
++        os.environ["TRANSLATOR_CONFIG_DIR"] = self.临时目录
++        self._旧路径补丁 = mock.patch.object(设置, "旧配置路径们", return_value=[])
++        self._旧路径补丁.start()
++        self.addCleanup(self._旧路径补丁.stop)
++        self.配置 = os.path.join(self.临时目录, "config.json")
++
++    def tearDown(self):
++        if self._旧值 is None:
++            os.environ.pop("TRANSLATOR_CONFIG_DIR", None)
++        else:
++            os.environ["TRANSLATOR_CONFIG_DIR"] = self._旧值
++        shutil.rmtree(self.临时目录, ignore_errors=True)
++
++    def _写磁盘(self, 数据):
++        with open(self.配置, "w", encoding="utf-8") as 文件:
++            json.dump(数据, 文件, ensure_ascii=False, indent=2)
++
++    def _读磁盘(self):
++        with open(self.配置, "r", encoding="utf-8") as 文件:
++            return json.load(文件)
++
++    def test_旧v2方案缺中译英提示词回填默认且磁盘不提前重写(self):
++        self._写磁盘({
++            "version": 2,
++            "current": "default",
++            "profiles": {
++                "default": {
++                    "base_url": "https://old/v1",
++                    "model": "old-model",
++                    "prompt": "旧提示",
++                }
++            },
++        })
++        配置 = 设置.load_config()
++        self.assertEqual(配置["prompt_zh2en"], 设置.默认中译英提示词)
++        self.assertEqual(配置["prompt"], "旧提示")
++        self.assertEqual(配置["base_url"], "https://old/v1")
++        self.assertEqual(配置["model"], "old-model")
++        # 未调用任何 save 之前，磁盘文件不得被重写：仍无 prompt_zh2en 键
++        磁盘 = self._读磁盘()
++        self.assertNotIn("prompt_zh2en", 磁盘["profiles"]["default"])
++
++    def test_扁平旧配置回填默认并保留其他字段(self):
++        self._写磁盘({
++            "api_key": "",
++            "base_url": "https://flat/v1",
++            "model": "flat-model",
++            "prompt": "扁平提示",
++        })
++        配置 = 设置.load_config()
++        self.assertEqual(配置["prompt_zh2en"], 设置.默认中译英提示词)
++        self.assertEqual(配置["prompt"], "扁平提示")
++        self.assertEqual(配置["base_url"], "https://flat/v1")
++        self.assertEqual(配置["model"], "flat-model")
++
++    def test_新建空方案带默认中译英提示词(self):
++        设置.load_profiles()
++        方案 = 设置.create_empty_profile("备用")
++        self.assertEqual(方案["prompt_zh2en"], 设置.默认中译英提示词)
++
++    def test_保存方案自定义值往返且省略时保留旧值(self):
++        设置.save_profile("work", "sk", "https://x/v1", "m", "p", "自定义")
++        self.assertEqual(
++            设置.load_profiles()["profiles"]["work"]["prompt_zh2en"], "自定义"
++        )
++        # 不传 prompt_zh2en（旧调用形状）：必须保留已有的自定义值
++        设置.save_profile("work", "sk2", "https://y/v1", "m2", "p2")
++        self.assertEqual(
++            设置.load_profiles()["profiles"]["work"]["prompt_zh2en"], "自定义"
++        )
++
++    def test_保存当前方案空字符串回退默认(self):
++        设置.save_profile("work", "sk", "https://x/v1", "m", "p", "自定义")
++        设置.switch_profile("work")
++        设置.save_config("sk", "https://x/v1", "m", "p", "")
++        self.assertEqual(设置.load_config()["prompt_zh2en"], 设置.默认中译英提示词)
++
++    def test_保存当前方案旧位置调用保留自定义值(self):
++        设置.save_profile("work", "sk", "https://x/v1", "m", "p", "自定义")
++        设置.switch_profile("work")
++        # 旧形状：只传 4 个位置参数，不带 prompt_zh2en
++        设置.save_config("sk", "https://x/v1", "m", "p")
++        self.assertEqual(设置.load_config()["prompt_zh2en"], "自定义")
++
++
++if __name__ == "__main__":
++    unittest.main(verbosity=2)

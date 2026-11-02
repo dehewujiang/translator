@@ -1,1 +1,1 @@
-{"level": "L3", "review_required": true, "level_reason": "跨模块：P2 改动覆盖 theme（深色/浅色调色板、字体、图标底色）、app（自绘滚动条、空状态、宽度拖拽）、settings_window（测试连接、钥匙显隐、深色标题栏），新增深色主题分支；无对外接口与数据变更"}
+{"level":"L3","review_required":true,"level_reason":"跨模块：settings 方案 schema 新增 prompt_zh2en 字段与默认值回填、settings_window 新增第二个提示词输入框与保存回填、core 中译英改为读配置并回退默认；存档格式为向后兼容加法，不改钥匙加密与既有字段，无对外接口"}

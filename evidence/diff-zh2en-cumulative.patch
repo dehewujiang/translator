@@ -1,0 +1,227 @@
+﻿diff --git a/translator_core.py b/translator_core.py
+index bdf6e25..3855fe6 100644
+--- a/translator_core.py
++++ b/translator_core.py
+@@ -20,7 +20,7 @@ from translator_domain import (
+     is_single_word,
+ )
+ from translator_provider import chat as _椹卞姩瀵硅瘽
+-from translator_settings import 榛樿鎺ュ彛鍦板潃, 榛樿妯″瀷, 榛樿鎻愮ず璇? load_config
++from translator_settings import 榛樿涓瘧鑻辨彁绀鸿瘝, 榛樿鎺ュ彛鍦板潃, 榛樿妯″瀷, 榛樿鎻愮ず璇? load_config
+ 
+ 
+ def _鏁寸悊鎺ュ彛鍦板潃(鍦板潃):
+@@ -58,6 +58,8 @@ def _call_api(绯荤粺鎻愮ず, 鐢ㄦ埛鍐呭, on_chunk=None, cancel=None):
+     "鏁翠釜鍗曡瘝鑷冲皯缁?涓緥鍙ワ紝姣忎釜渚嬪彞閮借鏈変腑鏂囷紱渚嬪彞鐭€屽父鐢ㄣ€?
+ )
+ 
++涓瘧鑻辨寚浠?= 榛樿涓瘧鑻辨彁绀鸿瘝
++
+ 
+ def lookup_word(word) -> Definition:
+     """鏌ュ崟璇嶏細杩斿洖璇嶅吀瀵硅薄銆傛ā鍨嬩笉鍚瘽鏃舵姏 PARSE 澶辫触锛屽師鏂囨斁 raw 閲屽鏌ャ€?""
+@@ -99,14 +101,27 @@ def translate_en_to_zh(text, on_chunk=None, cancel=None):
+     return _call_api(鎻愮ず璇? 鍘熸枃, on_chunk=on_chunk, cancel=cancel)
+ 
+ 
++def translate_zh_to_en(text, on_chunk=None, cancel=None):
++    """鎶婁腑鏂囩炕璇戞垚鑻辨枃锛屽彧杩斿洖鑻辨枃璇戞枃锛堟彁绀鸿瘝鏉ヨ嚜褰撳墠鏂规鐨?prompt_zh2en锛岀┖鏃跺洖閫€榛樿锛夈€?""
++    # 绌烘枃鏈洿鎺ヨ繑鍥炵┖锛屼笉璋冪敤鎺ュ彛
++    if text is None or str(text).strip() == "":
++        return ""
++    鍘熸枃 = str(text)
++    閰嶇疆 = load_config()
++    鎻愮ず璇?= str(閰嶇疆.get("prompt_zh2en", "") or "").strip() or 涓瘧鑻辨寚浠?+    return _call_api(鎻愮ず璇? 鍘熸枃, on_chunk=on_chunk, cancel=cancel)
++
++
+ def run_intent(鎰忓浘: Intent, on_chunk=None, cancel=None):
+     """鍞竴鍏ュ彛锛氭寜鎰忓浘鍒嗘淳锛屾垚鍔熻繑鍥炶瘧鏂?璇嶅吀锛屽け璐ヨ繑鍥?Failure锛屼笉鍚戠晫闈㈡姏寮傚父銆?""
+     鏂囨湰 = str(getattr(鎰忓浘, "text", "") or "").strip()
+     if 鏂囨湰 == "":
+-        return Failure(EMPTY, "娌℃湁鍙炕璇戠殑鍐呭锛屽厛澶嶅埗涓€娈佃嫳鏂囥€?)
++        return Failure(EMPTY, "娌℃湁鍙炕璇戠殑鍐呭锛屽厛澶嶅埗瑕佺炕鐨勫唴瀹广€?)
+     try:
+         if getattr(鎰忓浘, "kind", "") == WORD:
+             return lookup_word(鏂囨湰)
++        if getattr(鎰忓浘, "kind", "") == "zh":
++            return Translation(translate_zh_to_en(鏂囨湰, on_chunk=on_chunk, cancel=cancel))
+         return Translation(translate_en_to_zh(鏂囨湰, on_chunk=on_chunk, cancel=cancel))
+     except Failure as 澶辫触:
+         return 澶辫触
+diff --git a/translator_settings.py b/translator_settings.py
+index e9e7948..6f62e17 100644
+--- a/translator_settings.py
++++ b/translator_settings.py
+@@ -15,6 +15,7 @@ import sys
+ import time
+ 
+ 榛樿鎻愮ず璇?= "浣犳槸缈昏瘧锛屽彧杩斿洖涓枃璇戞枃锛屼唬鐮佸拰璺緞涓嶈缈昏瘧锛屼繚鎸佸師鏍枫€?
++榛樿涓瘧鑻辨彁绀鸿瘝 = "浣犳槸涓嫳缈昏瘧锛屽彧杩斿洖鑻辨枃璇戞枃锛屼唬鐮佸拰璺緞涓嶈缈昏瘧锛屼繚鎸佸師鏍枫€?
+ 榛樿鎺ュ彛鍦板潃 = "https://opencode.ai/inference/openai/v1"
+ 榛樿妯″瀷 = "deepseek-v4.1-flash"
+ 閰嶇疆鐗堟湰 = 2
+@@ -138,6 +139,7 @@ def _榛樿鏂规():
+         "base_url": 榛樿鎺ュ彛鍦板潃,
+         "model": 榛樿妯″瀷,
+         "prompt": 榛樿鎻愮ず璇?
++        "prompt_zh2en": 榛樿涓瘧鑻辨彁绀鸿瘝,
+     }
+ 
+ 
+@@ -148,6 +150,9 @@ def _琛ラ綈鏂规(鏂规):
+     for 閿?in ("api_key", "base_url", "model", "prompt"):
+         鍊?= 鏂规.get(閿? "")
+         鍑篬閿甝 = 鍊?strip() if isinstance(鍊? str) else ("" if 鍊?is None else str(鍊?)
++    鍊?= 鏂规.get("prompt_zh2en", "")
++    鍊?= 鍊?strip() if isinstance(鍊? str) else ("" if 鍊?is None else str(鍊?)
++    鍑篬"prompt_zh2en"] = 鍊?if 鍊?else 榛樿涓瘧鑻辨彁绀鸿瘝
+     return 鍑? 
+ 
+@@ -166,6 +171,7 @@ def _甯﹂挜鍖?鏂规):
+             "base_url": 鏂规.get("base_url", ""),
+             "model": 鏂规.get("model", ""),
+             "prompt": 鏂规.get("prompt", ""),
++            "prompt_zh2en": 鏂规.get("prompt_zh2en", ""),
+         }
+     )
+ 
+@@ -256,6 +262,7 @@ def _鍐欏叆鏁版嵁(鏁版嵁):
+             "base_url": 瀹屾暣["base_url"],
+             "model": 瀹屾暣["model"],
+             "prompt": 瀹屾暣["prompt"],
++            "prompt_zh2en": 瀹屾暣["prompt_zh2en"],
+         }
+         閽ュ寵 = 瀹屾暣["api_key"]
+         if 閽ュ寵:
+@@ -323,13 +330,15 @@ def data_profiles(鏁版嵁):
+     return 鏁版嵁["profiles"]
+ 
+ 
+-def save_config(api_key, base_url, model, prompt=None):
++def save_config(api_key, base_url, model, prompt=None, prompt_zh2en=None):
+     """淇濆瓨鍒板綋鍓嶆柟妗堛€俻rompt 涓嶄紶鍒欎繚鐣欏師鍊笺€?""
+     鏁版嵁 = load_profiles()
+     褰撳墠 = 鏁版嵁["current"]
+     鏃?= 鏁版嵁["profiles"].get(褰撳墠, {})
+     if prompt is None:
+         prompt = 鏃?get("prompt", 榛樿鎻愮ず璇?
++    if prompt_zh2en is None:
++        prompt_zh2en = 鏃?get("prompt_zh2en", 榛樿涓瘧鑻辨彁绀鸿瘝)
+     if base_url is None or str(base_url).strip() == "":
+         base_url = 榛樿鎺ュ彛鍦板潃
+     if model is None or str(model).strip() == "":
+@@ -337,20 +346,20 @@ def save_config(api_key, base_url, model, prompt=None):
+     if api_key is None:
+         api_key = ""
+     鏁版嵁["profiles"][褰撳墠] = _琛ラ綈鏂规(
+-        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt}
++        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt, "prompt_zh2en": prompt_zh2en}
+     )
+     _鍐欏叆鏁版嵁(鏁版嵁)
+     return dict(鏁版嵁["profiles"][褰撳墠])
+ 
+ 
+-def save_profile(name, api_key="", base_url="", model="", prompt=""):
++def save_profile(name, api_key="", base_url="", model="", prompt="", prompt_zh2en=""):
+     """鏂板缓鎴栨洿鏂颁竴涓柟妗堬紙涓嶅垏鎹㈠綋鍓嶏級銆傝繑鍥炲瓨濂界殑鏂规銆?""
+     鍚?= str(name or "").strip()
+     if not 鍚?
+         raise Exception("鏂规鍚嶅瓧涓嶈兘涓虹┖銆?)
+     鏁版嵁 = load_profiles()
+     鏁版嵁["profiles"][鍚峕 = _琛ラ綈鏂规(
+-        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt}
++        {"api_key": api_key, "base_url": base_url, "model": model, "prompt": prompt, "prompt_zh2en": prompt_zh2en}
+     )
+     _鍐欏叆鏁版嵁(鏁版嵁)
+     return dict(鏁版嵁["profiles"][鍚峕)
+@@ -382,6 +391,7 @@ def create_empty_profile(name):
+         "base_url": "",
+         "model": "",
+         "prompt": 榛樿鎻愮ず璇?
++        "prompt_zh2en": 榛樿涓瘧鑻辨彁绀鸿瘝,
+     }
+     _鍐欏叆鏁版嵁(鏁版嵁)
+     return dict(鏁版嵁["profiles"][鍚峕)
+diff --git a/translator_settings_window.py b/translator_settings_window.py
+index 07cfa1e..4d76aa2 100644
+--- a/translator_settings_window.py
++++ b/translator_settings_window.py
+@@ -277,6 +277,17 @@ class SettingsWindowMixin:
+         )
+         self.s_prompt_text.pack(fill="both", expand=True, pady=(px(4), 0))
+ 
++        瀛楁鍚?"涓瘧鑻辫姹傦紙涓枃杩涖€佽嫳鏂囧嚭锛?).pack(fill="x", pady=(px(9), 0))
++        self.s_prompt_zh2en_text = tk.Text(
++            body, height=3, width=1, font=SRC_FONT, wrap="word",
++            relief="flat", bd=0, highlightthickness=1,
++            highlightbackground=EDGE, highlightcolor=ACCENT,
++            bg=CARD_BG, fg=MAIN_FG, insertbackground=MAIN_FG,
++            padx=px(6), pady=px(4),
++        )
++        self.s_prompt_zh2en_text.pack(fill="both", expand=True, pady=(px(4), 0))
++        鎻愮ず("鐣欑┖灏辩敤榛樿锛氬彧杩斿洖鑻辨枃璇戞枃锛屼唬鐮佸拰璺緞淇濇寔鍘熸牱").pack(fill="x", pady=(px(3), 0))
++
+         for _鍙橀噺 in (self.s_url_var, self.s_key_var, self.s_model_var):
+             try:
+                 _鍙橀噺.trace_add("write", self._mark_dirty)
+@@ -286,6 +297,10 @@ class SettingsWindowMixin:
+             self.s_prompt_text.bind("<<Modified>>", self._mark_prompt_dirty)
+         except Exception:
+             pass
++        try:
++            self.s_prompt_zh2en_text.bind("<<Modified>>", self._mark_zh2en_dirty)
++        except Exception:
++            pass
+ 
+         try:
+             self._s_save_imgs = {
+@@ -366,7 +381,7 @@ class SettingsWindowMixin:
+ 
+         try:
+             win.update_idletasks()
+-            楂?= max(px(470), win.winfo_reqheight())
++            楂?= max(px(560), win.winfo_reqheight())
+             楂?= min(楂? win.winfo_screenheight() - px(100))
+             win.geometry(f"{px(620)}x{楂榼")
+         except Exception:
+@@ -552,6 +567,15 @@ class SettingsWindowMixin:
+             pass
+         self._mark_dirty()
+ 
++    def _mark_zh2en_dirty(self, _e=None):
++        try:
++            if not self.s_prompt_zh2en_text.edit_modified():
++                return
++            self.s_prompt_zh2en_text.edit_modified(False)
++        except Exception:
++            pass
++        self._mark_dirty()
++
+     def _fill_settings_fields(self):
+         name = (self._selected_profile_name() or "").strip()
+         if not name:
+@@ -570,10 +594,16 @@ class SettingsWindowMixin:
+             self.s_model_var.set(prof.get("model", ""))
+             self.s_prompt_text.delete("1.0", "end")
+             self.s_prompt_text.insert("1.0", prof.get("prompt", ""))
++            self.s_prompt_zh2en_text.delete("1.0", "end")
++            self.s_prompt_zh2en_text.insert("1.0", prof.get("prompt_zh2en", ""))
+             try:
+                 self.s_prompt_text.edit_modified(False)
+             except Exception:
+                 pass
++            try:
++                self.s_prompt_zh2en_text.edit_modified(False)
++            except Exception:
++                pass
+             self._s_dirty = False
+         finally:
+             self._refreshing_fields = False
+@@ -618,6 +648,7 @@ class SettingsWindowMixin:
+                 url,
+                 model,
+                 self.s_prompt_text.get("1.0", "end").strip(),
++                prompt_zh2en=self.s_prompt_zh2en_text.get("1.0", "end").strip(),
+             )
+             switch_profile(name)
+             self._refresh_settings_list(select_name=name)

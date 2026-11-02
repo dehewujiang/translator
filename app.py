@@ -386,7 +386,7 @@ class App(SettingsWindowMixin):
         self.dst_text.configure(yscrollcommand=self._on_dst_scroll)
         self.empty_hint = tk.Label(
             self.dst_wrap,
-            text="复制英文后轻点 Ctrl\n也可以在下面原文框输入英文",
+            text="复制要翻的内容后轻点 Ctrl\n也可以在下面原文框直接输入",
             justify="center", font=SRC_FONT, fg=FAINT_FG, bg=CARD_BG,
         )
         self.empty_hint.bind(
@@ -609,7 +609,7 @@ class App(SettingsWindowMixin):
                 pystray.MenuItem("退出", self._tray_quit),
             )
             self.tray_icon = pystray.Icon(
-                "翻译小助手", image, "英文翻译小助手", menu
+                "翻译小助手", image, "翻译小助手", menu
             )
             t = threading.Thread(target=self.tray_icon.run, daemon=True)
             t.start()
@@ -666,7 +666,7 @@ class App(SettingsWindowMixin):
         except Exception:
             cur = ""
         try:
-            self.root.title(f"英文翻译小助手 · {cur}" if cur else "英文翻译小助手")
+            self.root.title(f"翻译小助手 · {cur}" if cur else "翻译小助手")
         except Exception:
             pass
         try:
@@ -1530,7 +1530,7 @@ class App(SettingsWindowMixin):
                 self.on_input()
                 return
             self.popup()
-            self._say_transient("先复制英文，或在下面打字再点翻译")
+            self._say_transient("先复制要翻的内容，或在下面打字再点翻译")
             return
         self.last_clip = text
         short = text.strip()[:500].rstrip("\n") + "\n"
