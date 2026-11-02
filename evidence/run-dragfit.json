@@ -1,0 +1,16 @@
+{
+  "task": "修：向上拖矮窗口时底栏翻译按钮被挤出卡片",
+  "level": "L2",
+  "changed": ["app.py(_grip_drag 调 _fit_panes / 新增 _fit_panes / _refit 收口)", "tests/test_drag_fit.py(2 条新回归)"],
+  "commands": [
+    "python -m unittest tests.test_drag_fit -v   # 修前：1 FAILED (405>360)，修后：OK",
+    "python -m unittest discover -s tests       # 71 tests OK",
+    "python evidence/check_layout.py            # ALL PASS",
+    "python evidence/shot-drag.py               # 截图 evidence/drag-after.png，窗口 360 高按钮完整",
+    "python -m PyInstaller --noconfirm --clean 翻译小助手.spec  # Build complete",
+    "dist/翻译小助手.exe 启动冒烟 8s           # EXE_ALIVE 37688294 字节"
+  ],
+  "exit_codes": [0, 0, 0, 0, 0, 0],
+  "root_cause": "拖拽下限只按 WIN_H(360) 钳制，而卡片内容实际需要 432；Tk pack 不会自动缩文本框，最后打包的底栏被挤出卡片（footer 底边 405 > 窗口 360）",
+  "fix": "拖拽后按可用高度收放译文/原文框行数（先恢复自然行数再按需收），保证底栏始终在卡片内；_refit 同样收口，避免新译文把底栏再挤出去"
+}

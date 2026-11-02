@@ -1,0 +1,19 @@
+=== 修前（红）: python -m unittest tests.test_drag_fit -v ===
+test_往上拖到底底栏仍在卡片内 ... FAIL
+AssertionError: 405 not less than or equal to 360 : 底栏底边 405 超出窗口 360
+test_拖矮再拖高原文框恢复 ... ok
+Ran 2 tests  FAILED (failures=1)
+
+=== 修后（绿）: python -m unittest tests.test_drag_fit -v ===
+test_往上拖到底底栏仍在卡片内 ... ok
+test_拖矮再拖高原文框恢复 ... ok
+Ran 2 tests  OK
+
+=== 全量: python -m unittest discover -s tests ===
+Ran 71 tests  OK
+
+=== 界面回归: python evidence/check_layout.py ===
+ALL PASS
+
+=== 截图: python evidence/shot-drag.py ===
+saved evidence/drag-after.png  size=(380, 360) window_h=360

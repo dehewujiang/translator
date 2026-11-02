@@ -883,7 +883,26 @@ class App(SettingsWindowMixin):
             if 新高 != self._window_h:
                 self._window_h = 新高
                 self.root.geometry(f"{WIN_W}x{新高}")
+                self._fit_panes()
                 self._place_corners()
+        except Exception:
+            pass
+
+    def _fit_panes(self):
+        """拖完按窗口空间收放两块文本框：先恢复自然行数，再按需收行，保证底栏不被挤出卡片。"""
+        try:
+            self.root.update_idletasks()
+            self.dst_text.configure(height=5)
+            self._auto_split()
+            self.root.update_idletasks()
+            可用 = int(self._window_h) - 16
+            for 框 in (self.dst_text, self.src_text):
+                while (
+                    self.card.winfo_reqheight() > 可用
+                    and int(框.cget("height")) > 1
+                ):
+                    框.configure(height=int(框.cget("height")) - 1)
+                    self.root.update_idletasks()
         except Exception:
             pass
 
@@ -988,6 +1007,8 @@ class App(SettingsWindowMixin):
         except Exception:
             pass
         self._auto_split()
+        # 手动拖矮过的窗口：新译文进来后按空间收行，别把底栏再挤出去
+        self._fit_panes()
         # _auto_split 改完原文框高度后，实际需要的高度可能超过窗口：再兜一次底
         try:
             旧高 = self._window_h

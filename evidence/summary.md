@@ -47,3 +47,26 @@
 - `evidence/settings-before.png` / `settings-after.png`：配置窗改前 / 改后
 - `evidence/review.json`：独立复核（round 1 打回，round 2 通过）
 - `evidence/run-a1.json`：**已过期**（上一轮 56 条 / FIXED_CHROME=189 的记录），以 `test-a1.log` 与 `check_layout.py` 的输出为准
+
+# 收工证据 · 拖矮不压按钮（2026-11-02）
+
+1. 做了什么：修"底边手柄往上拖时翻译按钮消失"。拖拽下限只按 360 钳，而卡片内容要 432；现改为拖后按可用高度收放译文/原文框行数，`_refit` 同样收口。
+2. 验了什么：新回归 2 条（红 405>360 → 绿）；全量 71 单测 OK；`check_layout.py` ALL PASS；拖到 360 高截图 `evidence/drag-after.png` 按钮完整；exe 重打（37,688,294 字节）启动冒烟 8s 存活。
+3. 还剩什么：界面重做 10 条旧验收单仍未勾（见上文），本轮只验了下面 4 条。
+
+## 验收单（拖矮不压按钮）
+
+- [x] 鼠标放到卡片最下边空白（光标变上下箭头），按住往上拖到底 → 翻译按钮完整在卡片里，没被切
+- [x] 拖到底后滚轮滚译文区 → 能翻到后面没显示的内容
+- [x] 再把底边往下拖回去 → 原文框恢复 3 行左右，译文区变高
+- [x] 拖到最矮后复制新英文点 Ctrl → 新译文出来，按钮仍在，窗口不会自己弹高
+
+用户验收：全部通过（2026-11-02，原话“全部通过，提交这一轮”）
+
+## 证据在哪（本轮）
+
+- `evidence/test-dragfit.log`：红→绿单测输出、全量表、界面检查、截图记录
+- `evidence/run-dragfit.json`：命令、退出码、根因与改法
+- `evidence/repro-footer.py`：拖拽压按钮复现脚本（修后 RED=False）
+- `evidence/shot-drag.py` / `evidence/drag-after.png`：拖到最矮后的截图
+- `tests/test_drag_fit.py`：2 条新回归（拖到底按钮不越界、拖矮再拖高原文框恢复）
