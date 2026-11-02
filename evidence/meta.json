@@ -1,1 +1,1 @@
-{"level": "L2", "level_reason": "只改 app.py 单文件展示层拖拽下限逻辑，同模块可撤销，不碰接口与数据；先复现再修"}
+{"level": "L3", "review_required": true, "level_reason": "跨模块：P2 改动覆盖 theme（深色/浅色调色板、字体、图标底色）、app（自绘滚动条、空状态、宽度拖拽）、settings_window（测试连接、钥匙显隐、深色标题栏），新增深色主题分支；无对外接口与数据变更"}

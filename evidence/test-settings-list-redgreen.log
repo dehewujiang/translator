@@ -1,0 +1,11 @@
+=== 红：旧实现（逐项 font，Tk 不支持，异常被吞）===
+FAIL: test_ѡ�б�ķ���ʱ����������_�������� (tests.test_settings_list.�б���ɫ.test_ѡ�б�ķ���ʱ����������_��������)
+AssertionError: 'systemhighlighttext' != '#14171a'
+FAIL: test_ѡ��������ʱ��������ɫ (tests.test_settings_list.�б���ɫ.test_ѡ��������ʱ��������ɫ)
+AssertionError: '' != '#2563eb'
+Ran 2 tests in 0.129s
+FAILED (failures=2)
+
+=== 绿：修复后（selectforeground + foreground）===
+Ran 2 tests in 0.127s
+OK

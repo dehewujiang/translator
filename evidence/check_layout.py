@@ -23,6 +23,8 @@ sys.path.insert(0, BASE)
 os.chdir(BASE)
 
 import app as appmod
+from translator_layout import FOOTER_H, MARGIN, WIN_W
+from translator_scale import px
 from PIL import ImageGrab
 
 FAILURES = 0
@@ -68,7 +70,7 @@ a.root.update()
 time.sleep(0.3)
 
 # ---- 窗口基本形状 ----
-check("窗口宽==380", a.root.winfo_width() == 380, f"w={a.root.winfo_width()}")
+check(f"窗口宽=={WIN_W}", a.root.winfo_width() == WIN_W, f"w={a.root.winfo_width()}")
 try:
     无边框 = bool(a.root.overrideredirect())
 except Exception:
@@ -85,25 +87,25 @@ a.status_var.set("译文已复制，去别处粘贴就行")
 a._status_show()
 a.root.update()
 time.sleep(0.2)
-check("状态显示时底栏==32", a.footer.winfo_height() == 32,
+check(f"状态显示时底栏=={FOOTER_H}", a.footer.winfo_height() == FOOTER_H,
       f"footer_h={a.footer.winfo_height()}")
-check("状态显示时翻译按钮==32", a.translate_btn.winfo_height() == 32,
+check(f"状态显示时翻译按钮=={FOOTER_H}", a.translate_btn.winfo_height() == FOOTER_H,
       f"btn_h={a.translate_btn.winfo_height()}")
 
 # ---- 状态条消失后底栏仍在 ----
 a._status_hide()
 a.root.update()
 time.sleep(0.2)
-check("状态隐藏后底栏==32", a.footer.winfo_height() == 32,
+check(f"状态隐藏后底栏=={FOOTER_H}", a.footer.winfo_height() == FOOTER_H,
       f"footer_h={a.footer.winfo_height()}")
-check("状态隐藏后翻译按钮==32", a.translate_btn.winfo_height() == 32,
+check(f"状态隐藏后翻译按钮=={FOOTER_H}", a.translate_btn.winfo_height() == FOOTER_H,
       f"btn_h={a.translate_btn.winfo_height()}")
 
 
 def check_corners(标签):
     高 = a.root.winfo_height()
-    底 = 高 - 8 - 13
-    期望 = {"tl": 8, "tr": 8, "bl": 底, "br": 底}
+    底 = 高 - MARGIN - px(13)
+    期望 = {"tl": MARGIN, "tr": MARGIN, "bl": 底, "br": 底}
     for 角 in ("tl", "tr", "bl", "br"):
         实测 = a._corners[角].winfo_y()
         check(f"角遮罩@{标签}/{角} y=={期望[角]}", 实测 == 期望[角],

@@ -1,0 +1,43 @@
+{
+  "task": "UI 审核整改第一轮：P0 五条 + P1 七条",
+  "level": "L3",
+  "level_reason": "跨模块：新增 translator_scale.py，改 translator_theme/layout/settings_window/app 四个模块的像素常量与交互，涉及窗口尺寸、DPI 感知、配置窗行为；无对外接口与数据变更，但影响面覆盖全部界面",
+  "changed": [
+    "translator_scale.py(新增：DPI 感知 + px() 换算 + tk_scaling)",
+    "translator_theme.py(常量过 px()；FAINT_FG 3.07→4.6、ICON_FG 2.58→4.31；齿轮改 ICON_FG；图标几何随缩放；气泡 1.5s→8s 兜底；新增 _make_app_icon)",
+    "translator_layout.py(所有垂直节奏与 900 上限过 px())",
+    "app.py(Tk scaling 对齐 DPI；全部内边距/按钮尺寸过 px()；译文区只读；图标间距；窗口图标；音标分行)",
+    "translator_settings_window.py(尺寸 620x480 逻辑、锁定大小、间距收紧、删除二次确认、未保存关窗提醒、列表选中样式、标题栏图标)",
+    "tests/test_layout.py / test_resize.py / test_window_pos.py / test_drag_fit.py / test_settings_guard.py（新增 8 条）",
+    "evidence/check_layout.py（断言改用缩放常量）",
+    "tests/test_settings_list.py（新增 2 条：真实颜色断言，含红→绿记录）"
+  ],
+  "commands": [
+    "python -m unittest discover -s tests            # 81 tests OK",
+    "python evidence/check_layout.py                # ALL PASS",
+    "python evidence/check-round2.py                # ALL PASS",
+    "python evidence/audit-shots.py                 # 125% 原生截图 5 张",
+    "python -m PyInstaller --noconfirm --clean 翻译小助手.spec  # Build complete",
+    "dist/翻译小助手.exe 启动冒烟 + SHOW 窗口 475x530 # EXE_ALIVE"
+  ],
+  "exit_codes": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "dpi_finding": "真机 125%（GetDpiForSystem=120）；改前程序未声明 DPI 感知，窗口 380px 被系统拉伸到 475px 显示，整窗发虚",
+  "contrast": {
+    "FAINT_FG": "3.07 -> 4.60",
+    "ICON_FG": "2.58 -> 4.31",
+    "标准": "正文 4.5:1 / 图标 3:1"
+  },
+  "notes": "改前 5 张对照截图仍在 evidence/ui-*.png、settings-after.png；改后截图在 evidence/audit/；主窗高度 530 是 spacing/pady 补 px() 后的正常值，非回归",
+  "review_rounds": [
+    "round 1：打回（删除/关窗 fail-open；列表蓝色被覆盖）",
+    "round 2：打回（Listbox 不支持逐项 font，加粗未生效）",
+    "round 3：证据不足（功能通过；补列表红绿记录、计数笔误、测试 DPI 顺序、选中蓝字对比度）→ 本轮已全部补齐"
+  ]
+}

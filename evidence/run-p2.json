@@ -1,0 +1,39 @@
+{
+  "task": "UI 审核 P2 七条：测试连接、钥匙显隐、空状态引导、滚动条提示、英文字体、窗口宽度、深色模式",
+  "level": "L3",
+  "level_reason": "跨模块：改 theme（调色板/字体/图标底色）、app（滚动条/空状态/宽度拖拽）、settings_window（测试连接/钥匙显隐），新增深色主题分支；无对外接口与数据变更",
+  "changed": [
+    "translator_theme.py：深色/浅色调色板（系统主题跟随，TRANSLATOR_THEME 可覆盖）、EN_FONT=Segoe UI、TIP_BG/TIP_FG、SELECT_*、SECONDARY_*、DIV_HOVER、EXAMPLE_FG；图标/四角/气泡底色改为跟随 CARD_BG/TIP_BG",
+    "app.py：译文区外层容器 + 自绘细滚动条（溢出才显示）、空状态引导、左右边拖拽调宽（320–760 逻辑，会话内）、例句用英文字体、分隔线悬停色走主题",
+    "translator_settings_window.py：测试连接按钮（复用 provider.chat）、钥匙显示/隐藏、深色标题栏（DwmSetWindowAttribute）、列表选中色走主题",
+    "tests/test_p2.py（新增 6 条）、tests/test_drag_fit.py（+1 条拖宽）、tests/test_settings_list.py（颜色常量跟随主题）",
+    "README.md / AGENTS.md：功能与模块表同步",
+    "独立复核打回后的修复：拖宽热区移进卡片内部（避开色键穿透）、拖宽保持被拖边锚定并夹屏、滑块用屏幕坐标、深色标题栏（ForceDark + 建窗时短暂摘色键 + DWM 属性）、深色文字强调色 ACCENT_TEXT",
+    "evidence/shot-p2.py（新增：空状态/滚动条/配置窗截图，生成 audit 06–08）"
+  ],
+  "commands": [
+    "python -m unittest discover -s tests        # 88 tests OK",
+    "python evidence/check_layout.py            # ALL PASS",
+    "python evidence/check-round2.py            # ALL PASS",
+    "python evidence/check-p2.py                # ALL PASS（空状态/滚动条/拖宽/浅色+深色调色板）",
+    "python evidence/audit-shots.py             # 浅色截图 5 张",
+    "TRANSLATOR_THEME=dark python evidence/shot-dark.py  # 深色截图 4 张",
+    "python -m PyInstaller --noconfirm --clean 翻译小助手.spec  # Build complete",
+    "dist/翻译小助手.exe 冒烟 + SHOW → 475x530",
+    "python evidence/e2e-mouse.py                 # ALL PASS（真实鼠标）",
+    "python evidence/p2-redgreen.py               # 红→绿 6 组全部符合预期"
+  ],
+  "exit_codes": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "notes": "深色模式跟随系统启动时读取（注册表 AppsUseLightTheme），不做运行时热切换；宽度只记本次运行，不写配置。测试连接的失败文案取自 Failure.message。"
+}

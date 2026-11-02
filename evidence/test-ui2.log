@@ -1,0 +1,44 @@
+=== 全量单测 ===
+python -m unittest discover -s tests
+Ran 81 tests
+OK
+
+=== 对话框异常（红→绿，见 test-guard-redgreen.log）===
+红：Exception 时旧代码 fail-open（删了 / 关了）→ 2 FAIL
+绿：默认按"取消"处理 → 7 tests OK
+
+=== 列表配色（真实颜色断言，tests/test_settings_list.py）===
+选中正在用 → 该行前景 #2563eb、selectforeground #1d4ed8（浅蓝底上 5.82:1）
+选中别的方案 → selectforeground #14171a；正在用那行前景仍 #2563eb；未配置行 #6b7686
+2 tests OK；红→绿记录见 test-settings-list-redgreen.log
+（Tk Listbox 不支持逐项字体，已改为 selectforeground 动态设置）
+
+=== 界面回归（125% 真机） ===
+python evidence/check_layout.py
+PASS 窗口宽==475
+PASS 状态显示/隐藏时底栏==40、翻译按钮==40
+PASS 四角遮罩@530 / @680 全部对齐
+PASS 窗口内无品红像素
+ALL PASS
+
+=== 运行时验收 ===
+python evidence/check-round2.py
+PASS DPI 缩放系数已生效 [scale=1.25]
+PASS 窗口宽度按缩放放大 [w=475]
+PASS 译文只读 / 程序写入正常 / 非本类写入被拦住
+PASS 配置窗已打开 / 锁定大小 / 未超出屏幕
+PASS 关窗提醒：点取消窗口还在
+PASS 删除确认：点取消不删
+PASS 确认后关窗成功
+ALL PASS
+
+=== 尺寸实测（物理像素，测量进程已声明 DPI 感知）===
+主窗：475x530 @ (1415,60)
+      高度比上一轮的 515 多 15px：spacing1/2/3 与 pady 补了 px() 后的正常增量
+配置窗：客户区 775x606（=620x485 逻辑，命中设计值）；外框含标题栏 793x653
+
+=== 打包与冒烟（见 build-ui2.log） ===
+python -m PyInstaller --noconfirm --clean 翻译小助手.spec  → Build complete
+启动 8 秒：EXE_ALIVE；SHOW 后窗口 475x530 —— 与源码版一致
+
+dist/翻译小助手.exe  37,695,705 字节

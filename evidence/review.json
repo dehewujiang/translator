@@ -1,46 +1,51 @@
 {
   "verdict": "通过",
-  "task_verdict": "有条件通过",
-  "round": 2,
-  "previous_verdict": "打回",
-  "reviewer": "验收小工",
   "checked": [
-    "状态条（blocker）：真实 App（stub `_start_trigger/_start_tray/_start_singleton_server`，同 `evidence/grab_ui.py`）调用 `_say_transient('译文已复制，去粘贴试试')` 后 `footer.winfo_height()==32`、`translate_btn.winfo_height()==32`、`header.winfo_height()==28`、`status_label.master is header`；`_status_hide()` 后仍 32/32；带文本时 card 596→596、root 612→612，无文本时 card 446→446，状态条不再改变卡片高度。",
-    "顶栏裁切：同一真实 App 测得 `header.winfo_height()==28`、`copy_btn.winfo_reqheight()==copy_btn.winfo_height()==28`、`close_btn` 同为 28；`app.py:212-263` 的 header height=ICON_BTN、按钮 height=ICON_BTN 与实测一致，无 2px 裁切。",
-    "FIXED_CHROME：`translator_layout.FIXED_CHROME==203`；实测 `root.winfo_reqheight() 462 - dst_text.winfo_reqheight() 174 - src_text.winfo_reqheight() 85 == 203`；`app.py` pack 参数逐项对上（card padx/pady 8/8、header pady(12,0)/h28、dst pady(8,0)、divider pady(22,0)/h9、src_head pady(14,0)/h28、src_text pady(6,0)、footer pady(10,18)/h32）；`HEADER_H==LABEL_H==ICON_BTN==28`；`tests/test_layout.py` 的 `test_顶栏与原文行高度等于图标按钮尺寸` 与 `test_固定铬等于203` 直接断言这些关系，不再只对常量做同义相加。",
-    "翻译按钮：`translate_btn.winfo_reqheight()==32`；`app.py:374-392` 使用 96x32 图片、width=96/height=32、bd=0/padx=0/pady=0；`footer.winfo_height()==32`，按钮与底栏等高。",
-    "死代码/导入：AST+grep 复查 `app.py` 中 `_按钮|ttk|TITLE_FONT|ACCENT_PRESS|RADIUS|EDGE|GAP|ICON_FG` 均 0 命中；app.py 从 `translator_theme` 导入的 26 个符号全部有使用；`python -c \"import app\"` 输出 `IMPORT OK`；`python -m py_compile app.py translator_theme.py translator_layout.py translator_settings_window.py` 退出 0。全仓复查 translator_theme.py 仍有未引用的 RADIUS/GAP/TITLE_FONT（见 findings，属清理项）。",
-    "证据文件：`python evidence/check_layout.py` 单独运行 5/5 次退出 0、末行 `ALL PASS`（状态显示/隐藏时 footer 与按钮均 32、四角 13x13、462/612 两个高度对齐、窗口内 magenta=0）；`python -m unittest discover -s tests -v` 新鲜运行 `Ran 58 tests ... OK`；`git diff --numstat -- tests` 为 `43 0`（无删除）；`evidence/test-a1.log` 13:04:55 显示 58 tests OK，晚于 `tests/test_layout.py` 13:03:22；`evidence/summary.md` 标题/正文为本轮“状态条压扁底栏等 6 缺陷修复”；`evidence/meta.json` level=L3、review_required=true。",
-    "回归：`C:\\Users\\Administrator\\AppData\\Local\\Temp\\opencode\\smoke_borderless.py` 两次运行均 `drag_ok=True`、`close_ok=True`、`esc_ok=True`；真实 `_toggle_source` 展开/收起路径 491→635→624 三个高度，四角遮罩均为 13x13 且 bl/br 的 y==h-21。",
-    "视觉值：`evidence/mockup-a1.png`/`mockup-a2.png` 与当前渲染对照，主蓝≈#2563EB、圆角 12/8、PAD_X=18、主按钮 96x32、角遮罩 13x13 均未变；未评审审美方向。"
+    "第1条 测试连接：`translator_settings_window.py` 仍复用 `translator_provider.chat`，后台线程 + `after` 回主线程，缺字段早退，测试中按钮 disabled。用最终代码重跑真实 mainloop 探针：成功显示“连接正常：模型回复「正常」”、失败显示“连接失败：钥匙无效（401）”、按钮恢复 normal；缺字段 0 次请求；未完成时销毁配置窗不崩。通过。",
+    "第2条 钥匙显隐：最终代码下真实配置窗点两次，Entry `show` 为 `*`→``→`*`，按钮文字“显示”→“隐藏”→“显示”。通过。",
+    "第3条 空状态引导：最终代码下空窗 `empty_hint` 可见；写入“翻译中，请稍等…”后自动收起且不进入 `dst_text`；点击引导焦点到原文框，无异常。通过。",
+    "第4条 滚动条：`_bar_jump` 已改用 `event.y_root - dst_bar.winfo_rooty()`。真实鼠标复验：滚到中间（yview 0.50）后抓滑块，按下不再跳顶（0.50→0.512），向下拖 96px 到 0.967；轨道点击 0.21→0.79；长内容出现、短内容收起。通过。",
+    "第5条 英文字体：原文框与词典“例英”仍使用 `EN_FONT=('Segoe UI',10)`，释义/词性/“例中”用微软雅黑。通过。",
+    "第6条 窗口宽度：热区已从透明边移进卡片内部 6px、用 `CARD_BG`；真实鼠标实测左右热区光标均为 size_we（中心为普通箭头），右拖 475→505 且右缘=1920 不越屏，左拖 505→567 且右缘 1920→1920 不动；极端拖拽宽度 950（px760）夹在屏内；最小宽 400、底栏底 497≤530；窄化长译文后高度重新贴合到 777 且未越屏。通过。",
+    "第7条 深色模式：最终代码 `TRANSLATOR_THEME=dark` 现场复拍配置窗标题栏平均亮度 43.6（d4 截图同为 43.6），主窗色键在开窗后恢复为 #FF00FE；主窗/列表/图标/四角/气泡跟随主题。`ACCENT_TEXT` 深色 #9DBBFF on #1E2227=8.36:1，`ERROR_FG` #FF9A8A on #1E2227=7.80:1；d3 词典“词性”已变浅蓝。`test_p2` 已加 `ACCENT_TEXT >= 4.5` 断言，浅色/深色两轮均过。通过。",
+    "修复项 红→绿：把 `evidence/p2-redgreen.py` 复制到临时目录执行（避免改写项目证据），六组全部复现：钥匙显隐/测试连接/对比度/空状态/滚动条均为“关掉实现→红、恢复→绿”；拖宽旧 bug 热区在透明边 475→475，热区移进卡片后 475→505。通过。",
+    "修复项 真实鼠标：`python evidence/e2e-mouse.py` 我自己连跑 3 次，均 ALL PASS（拖右 475→505、右缘 1920；拖左 505→567、右缘 1920→1920；滑块 0.00→0.21；轨道 0.21→0.79）。通过。",
+    "P0/P1 回归：`python -m unittest discover -s tests -v` → Ran 88 tests OK；`check_layout.py`、`check-round2.py`、`check-p2.py` 均 ALL PASS；DPI/只读/删除确认/关窗提醒/列表配色/四角未见回归。通过。"
   ],
   "missing": [],
+  "blocking": [],
   "findings": [
     {
-      "file": "translator_theme.py",
-      "issue": "全仓复查仍有未引用的定义：RADIUS（第 38 行，仅赋值）、GAP（第 41 行，仅赋值）、TITLE_FONT（第 23 行，仅赋值；HEAD 已有）。app.py 侧已全部清理，但第 5 条若按“全仓无未使用定义”严格解读，本轮只完成了 app.py 部分；不影响 import/运行。",
-      "evidence": "AST/grep：translator_theme.py:23/38/41 各 1 次；app.py 0 命中；`python -c \"import app\"` 成功。"
+      "file": "evidence/summary.md:106",
+      "issue": "仍写“exe 重打 37,701,892 字节”，实际最终 exe 为 37,703,328 字节（build-p2.log/stat 12:04:39；协调者口径也是 37,703,328）。属陈旧数字，不影响功能与冒烟结论。",
+      "evidence": "stat dist/翻译小助手.exe = 37,703,328；evidence/build-p2.log 12:04:39 Build complete。"
     },
     {
-      "file": "evidence/run-a1.json",
-      "issue": "仍是上一轮 12:15 的旧证据：tests.count=56、fixed_chrome=189，与本轮 58 tests / FIXED_CHROME=203 矛盾；summary.md 未引用它，但留在 evidence 里会误导后续复核。",
-      "evidence": "evidence/run-a1.json mtime 2026-10-30 12:15:43；当前 evidence/test-a1.log 13:04:55 显示 Ran 58 tests OK；translator_layout.FIXED_CHROME=203。"
+      "file": "evidence/summary.md / evidence/run-p2.json",
+      "issue": "截图口径对不上：summary 写“浅色 5 张 + 深色 4 张”，实际 `evidence/audit/` 有 8 张（01-08）；`run-p2.json` 只列 `audit-shots.py # 浅色截图 5 张`，漏列生成 06-08 的 `shot-p2.py`。属文档计数问题。",
+      "evidence": "ls evidence/audit 有 01-08 共 8 张；shot-p2.py 生成 06/07/08；run-p2.json commands 无 shot-p2.py。"
     },
     {
-      "file": "evidence/check_layout.py",
-      "issue": "单独运行稳定（5/5 ALL PASS），但与另一个会 focus_force 的 Tk App（smoke_borderless.py）同时运行时 3/3 退化为 FAILED 2：窗口被 FocusOut 隐藏后第二次 _place_top_right 的 geometry 未在 root.update() 内生效，check_corners 用 root.winfo_height() 算期望、_place_corners 用 _window_h 放置，隐藏态二者错位。属检查脚本的时序/焦点鲁棒性问题；独立探针在真实 462/491/612/635 高度均对齐，不是产品布局回归。",
-      "evidence": "单独 `python evidence/check_layout.py` 5 次均 exit 0/ALL PASS；与 smoke 并行 3 次均 `FAILED 2`（角遮罩@462/bl y=591 vs 期望 441）。"
+      "file": "translator_settings_window.py:78-99",
+      "issue": "深色开窗时先摘主窗色键、`win.update()` 后再应用 DWM，存在极短瞬态：探针在 `_apply_dark_titlebar` 入口采到主窗透明边为 (255,0,254) 品红、配置窗标题栏为 (229,229,229) 浅色；恢复后主窗边正常、标题栏 43 深色。最终状态正确，但打开配置窗可能有一帧闪。",
+      "evidence": "临时探针 probe_open_flash.py：during open margin=(255,0,254), title=(229,229,229)；after margin restored, title dark。"
+    },
+    {
+      "file": "evidence/e2e-mouse.py",
+      "issue": "E2E 的滑块用例是从 yview 0.00 顶部开始拖的；上轮的关键 bug 是“滚到中间再抓滑块会跳顶”。我另写探针验证中间抓取已修（0.50→0.512→0.967），建议把该场景补进 E2E 固化。",
+      "evidence": "临时探针 probe_thumb_mid.py：mid_press=0.512 after=0.967 PASS=True。"
+    },
+    {
+      "file": "translator_theme.py:58 / translator_settings_window.py:385",
+      "issue": "使用 uxtheme 未文档化序号 135/133（SetPreferredAppMode/AllowDarkModeForWindow），未来 Windows 版本可能失效；当前失败会被 try 捕获，本机实测有效。",
+      "evidence": "代码行；本机 18363 最终标题栏变深、主窗色键恢复。"
     }
   ],
-  "blocking": [],
   "notes": [
-    "上一轮（round 1）裁决为 打回；本轮按任务卡只复验 6 项修复 + 回归/视觉值。",
-    "状态条最终位置：status_label 的 master 是 self.header；header 设了 pack_propagate(False) 且 height=ICON_BTN，状态标签显示/隐藏只改 header 内部布局，不参与卡片高度计算。",
-    "四角遮罩独立探针：462/491/612/635 高度下均 13x13，bl/br y 恒为 h-8-13；两高度对齐要求满足。",
-    "拖拽/✕/Esc：smoke 断言三项均 True；Esc 仍需窗口有键盘焦点，属任务卡明确允许的既有行为，未按回归判。",
-    "红绿说明：红证据是上一轮 review.json 里真实 App 复现的 footer=2；绿证据是本轮 check_layout/独立探针的 footer=32。本轮没有新增一份独立的失败日志；若严格按 TDD 留档，建议下次先存失败快照再修。",
-    "本轮未改任何源码、测试或截图；仅写入本 review.json。所有复现脚本/临时输出在 %TEMP%\\opencode 下，未进项目。",
-    "系统四档映射：verdict=通过；任务卡三档映射：task_verdict=有条件通过。条件仅为上面 findings 的清理/稳定化项，不阻断本次功能验收。"
+    "上一轮 6 条 blocking 均已闭合：拖宽热区、拖宽锚点/夹屏、滑块坐标、深色标题栏、深色强调色、P2 红→绿。",
+    "本轮我独立重跑：88 tests OK、check_layout/check-round2/check-p2 ALL PASS、e2e-mouse 3 次 ALL PASS、p2-redgreen 六组复现、深色标题栏与 ACCENT_TEXT 对比度实采。",
+    "深色模式仍是启动时读取，运行中切系统主题需重开；宽度只记本次运行，不写配置，符合本轮说明。",
+    "浅色/深色截图均晚于最终代码保存（浅色 12:03 vs app.py 11:43/theme 11:57；深色 11:57:06 vs theme/settings 11:57:05），时间顺序正常。"
   ],
-  "reviewed_at": "2026-10-30T13:14:47"
+  "reviewed_at": "2026-11-02T12:13:13"
 }

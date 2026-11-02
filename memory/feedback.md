@@ -8,3 +8,11 @@
 6. 效果图能省掉一轮返工：用户说不清要什么时，先出图（两张只差一个决策点）比问十个问题快；但效果图里的"死白"要按真实内容高度给，给成固定大画布会显得像坏了。
 7. 验收单不能写文件名/函数名：收工门会判不合格，验收单只写"你在哪儿→做什么→该看到什么"，机器证据放"验了什么"和"证据在哪"。
 8. "窗口变矮被裁"类 bug 要看打包顺序：Tk pack 不会自动缩文本框，最后打包的部件最先被挤出视口；复现时量 `winfo_y()+winfo_height()` 对比窗口高，比看截图可靠。改完补一条"模拟 press+drag 再量 footer"的回归测试。
+9. 控件不支持的选项会静默失败：Tk Listbox 没有逐项 `-font`，`itemconfig(font=...)` 抛 TclError，被 `except: pass` 吞掉后"看起来改了、实际没生效"。改样式前先查控件支持哪些选项，并用真实属性断言（`itemcget`/`cget`）验收。
+10. 确认框别写 fail-open：`askyesno` 外面套 `except: 确认 = True`，等于对话框一坏就直接删除。不可逆操作必须 `False`。
+11. DPI 测量有陷阱：未声明 DPI 的进程量 `GetWindowRect` 得到的是虚拟化坐标（125% 下 475 会读成 380）。测量脚本自己也要先 `SetProcessDpiAwareness(1)`，否则会把正常当 bug。
+12. 改像素前先确认单位：Tk 的 `spacing1/2/3`、`padx/pady`、按钮 `width/height`（带图片时）都是像素，必须过 px()；`height=` 行数、字号 point 不能乘。
+13. 色键窗口的坑不止外观：`-transparentcolor` 的像素在 Windows 上**点击穿透**，放在透明边上的拖拽热区用户根本点不到；热区必须落在不透明区域。它还会让子窗口的深色标题栏失效，需要建窗前临时摘掉。
+14. Tk 事件不是"发了就到"：脚本里用 Win32 注入鼠标后，不调用 `update()` 就不会处理事件，会误判成"点不到"。E2E 每一步都要 pump 一次事件循环。
+15. `Listbox`/Tk 控件不支持的选项会抛 TclError 且常被 `except: pass` 吞掉，功能静默失效；断言要查真实属性（`itemcget`/`cget`），别只断言"调用没报错"。
+16. DWM 深色标题栏：`DwmSetWindowAttribute` 返回 HRESULT，失败也是 0x8007xxxx 的负数，不能无条件 break；属性 20/19 要按系统版本重试。

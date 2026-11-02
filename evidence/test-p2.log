@@ -1,0 +1,44 @@
+=== 全量单测 ===
+python -m unittest discover -s tests
+Ran 88 tests
+OK
+
+=== P2 验收脚本 ===
+python evidence/check-p2.py
+PASS 空状态引导可见
+PASS 长内容出现滚动条
+PASS 滚动条很细
+PASS 短内容收起滚动条
+PASS 有内容时引导隐藏
+PASS 右侧拖宽生效
+PASS 拖宽有下限
+PASS 拖宽后底栏不越界
+PASS 浅色调色板与 P2 逻辑
+PASS 深色调色板与 P2 逻辑
+ALL PASS
+
+=== 真实鼠标 E2E（连跑 3 次全过） ===
+python evidence/e2e-mouse.py
+PASS 真实鼠标拖右边能加宽 [475->505]
+PASS 右边缘不越出屏幕 [右缘=1920]
+PASS 真实鼠标拖左边能加宽 [505->567]
+PASS 拖左边时右边缘不动 [1920->1920]
+PASS 长内容滚动条出现
+PASS 真实鼠标拖滑块能滚 [0.00->0.21]
+PASS 点轨道能跳转 [0.21->0.79]
+PASS 中间抓滑块不跳顶 [0.50->0.59]
+ALL PASS
+
+=== P2 红→绿（evidence/p2-redgreen.log） ===
+钥匙显隐：关掉实现 → FAIL；恢复 → 通过
+测试连接：关掉实现 → FAIL；恢复 → 通过
+对比度：临时调浅 FAINT_FG → FAIL；恢复 → 通过
+空状态：关掉实现 → 引导不可见；恢复 → 可见
+滚动条：关掉实现 → 不出现；恢复 → 出现
+拖宽：热区放透明边（旧 bug）→ 真鼠标拖不动 475->475；放回卡片内 → 475->505
+
+=== 深色对比度实测 ===
+MAIN 13.37:1 / SUB 7.54 / FAINT 6.18 / ICON 7.53 / 文字强调色 8.36 / 提示条 10.16
+
+=== 打包 ===
+python -m PyInstaller --noconfirm --clean 翻译小助手.spec  → Build complete

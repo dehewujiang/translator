@@ -1,0 +1,4010 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 4bf6bd1..082a0b0 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -12,7 +12,8 @@
+ | `translator_settings.py` | 配置层：路径、schema、原子写、DPAPI 加密、旧配置迁移 |
+ | `translator_theme.py` | 样子层：颜色字体常量、按钮工厂、小提示、托盘图标；不管业务逻辑 |
+ | `translator_layout.py` | 纯计算：窗口宽高、原文区/窗口高度公式；不建窗口 |
+-| `translator_settings_window.py` | 配置窗：混入 App 的一坨（列表/回填/新增/保存/切换/删除）；只读 settings 与 theme |
++| `translator_scale.py` | 环境层：导入即声明 DPI 感知；`px()` 把 96dpi 设计值换算成当前像素；字号基准 `tk_scaling()`；零项目依赖 |
++| `translator_settings_window.py` | 配置窗：混入 App 的一坨（列表/回填/新增/保存/切换/删除/测试连接）；只读 settings、theme 与 provider（仅测试连接） |
+ | `app.py` | 展示层：组装、触发、剪贴板、翻译流程、渲染、托盘；不判断词句、不拼提示词 |
+ | `tests/` | 标准库 unittest，全部离线；跑：`python -m unittest discover -s tests -v` |
+ | `docs/architecture-redesign.md` | 目标架构、契约、迁移顺序（第 2–4 步未做）、验收单 |
+@@ -20,7 +21,7 @@
+ 
+ ## 依赖方向
+ 
+-`app → core → provider/domain`，不许反向；`app` 与 `core` 都可读 `settings`，`settings` 不依赖本项目其他模块；`app` 还可读 `theme/layout/settings_window`，新三模块不反向依赖 `app`；界面和 core 都不 import requests，不拼 URL，不解析错误文字。
++`app → core → provider/domain`，不许反向；`app` 与 `core` 都可读 `settings`，`settings` 不依赖本项目其他模块；`app` 还可读 `theme/layout/settings_window`，新三模块不反向依赖 `app`；`theme` 与 `layout` 可读 `scale`，`scale` 不依赖任何项目模块；界面和 core 都不 import requests，不拼 URL，不解析错误文字。
+ 
+ ## 交付规矩
+ 
+diff --git a/README.md b/README.md
+index 45bdd60..4e9aa94 100644
+--- a/README.md
++++ b/README.md
+@@ -5,10 +5,12 @@
+ ## 直接用（不用装任何东西）
+ 
+ 1. 找作者要 `dist\翻译小助手.exe`，双击。右下角托盘冒出“译”字图标就是跑起来了（没弹窗是正常的，它在后台等着）。
+-2. 右键托盘图标 → 显示窗口 → 点齿轮进配置，把**地址、钥匙、模型**三样填好保存。钥匙去你用的模型官网申请，每台电脑第一次都要填自己的。
++2. 右键托盘图标 → 显示窗口 → 点齿轮进配置，把**地址、钥匙、模型**三样填好，先点「测试连接」确认能用，再保存。钥匙去你用的模型官网申请，每台电脑第一次都要填自己的；旁边「显示」可以核对钥匙有没有粘错。
+ 3. 复制一段英文，轻点一下 `Ctrl`（点一下就松开），译文弹窗自动出来。
+ 
+ 小技巧：`Alt+Q` 随时叫出窗口；光标自动进原文框，打完字按回车就翻；点窗口外面自动藏起；退出走托盘右键。
++拖底边能调高矮，拖左右边能调宽窄；顶栏图钉可以把窗口钉住，点外面不消失。
++窗口外观跟随系统：系统用深色，弹窗也是深色。
+ 
+ ## 自己跑源码（第一次拉下来看这里）
+ 
+@@ -22,7 +24,7 @@ run.bat            ← 双击：检查 Python → 自动装依赖 → 验零件
+ 如果双击后黑窗口报“缺零件”或“依赖装不上”，上面的红字就是原因，修好重双击就行。
+ `run_hidden.vbs` 跟 `run.bat` 效果一样，只是不弹黑窗（出问题时还是用 `run.bat`，能看见报错）。
+ 
+-需要 Python 3 + `pip install -r requirements.txt`。跑测试：`python -m unittest discover -s tests -v`（48+ 条，全离线）。
++需要 Python 3 + `pip install -r requirements.txt`。跑测试：`python -m unittest discover -s tests -v`（88 条，全离线）。
+ 
+ 改完代码 exe 不会自动更新，重打才分发：`python -m PyInstaller --noconfirm --clean 翻译小助手.spec`。
+ 
+@@ -37,6 +39,7 @@ run.bat            ← 双击：检查 Python → 自动装依赖 → 验零件
+ | `app.py` | 界面组装、触发、翻译流程、渲染 |
+ | `translator_theme.py` | 颜色字体、按钮样子 |
+ | `translator_layout.py` | 窗口多高（纯算数） |
++| `translator_scale.py` | 高分屏缩放：DPI 感知与像素换算 |
+ | `translator_settings_window.py` | 配置窗 |
+ | `translator_core.py` | 翻译大脑，唯一入口 `run_intent` |
+ | `translator_domain.py` | 查词/翻译两种意图，三种结果 |
+diff --git a/app.py b/app.py
+index 82a932d..2bb7fce 100644
+--- a/app.py
++++ b/app.py
+@@ -65,15 +65,21 @@ except Exception:
+     HAS_PYSTRAY = False
+ 
+ from translator_theme import (
+-    FONT, SRC_FONT, LBL_FONT, WORD_FONT, PHON_FONT, POS_FONT,
+-    MAIN_FG, SUB_FG, FAINT_FG, LINE, CARD_BG, EDGE,
+-    ACCENT, ACCENT_HOVER, HOVER_BG, KEY_COLOR,
++    FONT, SRC_FONT, LBL_FONT, WORD_FONT, PHON_FONT, POS_FONT, EN_FONT,
++    MAIN_FG, SUB_FG, FAINT_FG, ICON_FG, LINE, CARD_BG, EDGE,
++    ACCENT, ACCENT_HOVER, HOVER_BG, KEY_COLOR, SCROLL_THUMB, SCROLL_ACTIVE,
++    EXAMPLE_FG, DIV_HOVER, ACCENT_TEXT,
+     PAD_X, HAS_PIL, ICON_BTN, _Tip, _make_tray_image,
+     _make_copy_image, _make_close_image, _make_chevron_image,
+     _make_gear_image, _make_grip_image, _make_pin_image,
+-    _make_primary_button_image, _make_corner_image,
++    _make_primary_button_image, _make_corner_image, _make_app_icon,
+ )
+-from translator_layout import WIN_W, WIN_H, _算原文高度, _算窗口高度, _钳制窗口高度
++from translator_layout import (
++    WIN_W, WIN_H, MARGIN, TOP_PAD, GAP_AFTER_HEADER, GAP_BEFORE_DIV, DIV_H,
++    GAP_AFTER_DIV, GAP_AFTER_LABEL, GAP_BEFORE_FOOTER, FOOTER_H, BOTTOM_PAD,
++    _算原文高度, _算窗口高度, _钳制窗口高度,
++)
++from translator_scale import px, tk_scaling
+ from translator_settings_window import SettingsWindowMixin
+ 
+ HAS_TRAY = HAS_PYSTRAY and HAS_PIL
+@@ -166,6 +172,11 @@ def _是否该藏(钉住, 可见, 配置开, 自家激活, 指针在内):
+ class App(SettingsWindowMixin):
+     def __init__(self):
+         self.root = tk.Tk()
++        try:
++            # 字体跟着系统缩放走，和 px() 同步；声明过 DPI 感知后 Tk 才拿得到真实 DPI
++            self.root.tk.call("tk", "scaling", tk_scaling())
++        except Exception:
++            pass
+         self._borderless_ok = True
+         self._transparent_ok = True
+         try:
+@@ -174,9 +185,20 @@ class App(SettingsWindowMixin):
+             self._borderless_ok = False
+         self.root.geometry(f"{WIN_W}x{WIN_H}")
+         self._window_h = WIN_H
++        self._window_w = WIN_W
++        self._width_zones = []
++        self._resize_w = False
++        self._width_x0 = None
++        self._width_w0 = None
+         self._place_top_right()
+         self.root.attributes("-topmost", True)
+         self.root.option_add("*Font", FONT)
++        try:
++            # 配置窗标题栏、任务栏、托盘统一用同一个图标
++            self._app_icon = _make_app_icon()
++            self.root.iconphoto(True, self._app_icon)
++        except Exception:
++            self._app_icon = None
+         try:
+             self.root.configure(background=KEY_COLOR)
+         except Exception:
+@@ -230,7 +252,7 @@ class App(SettingsWindowMixin):
+         # ---- 白卡片：窗口里唯一的实面，四周 8px 透明边；1px EDGE 描边在白底上划出边界 ----
+         self.card = tk.Frame(self.root, background=CARD_BG, bd=0, highlightthickness=1,
+                              highlightbackground=EDGE, highlightcolor=EDGE)
+-        self.card.pack(padx=8, pady=8, fill="both", expand=True)
++        self.card.pack(padx=MARGIN, pady=MARGIN, fill="both", expand=True)
+ 
+         # ---- 状态条平时不占地方：有字才冒出来，寄在顶栏左侧空位 ----
+         self.status_var = tk.StringVar(value="")
+@@ -240,7 +262,7 @@ class App(SettingsWindowMixin):
+ 
+         # ---- 顶栏 28px：复制 + 关闭右对齐，状态条居左；整条可拖 ----
+         self.header = tk.Frame(self.card, background=CARD_BG, height=ICON_BTN)
+-        self.header.pack(fill="x", padx=PAD_X, pady=(12, 0))
++        self.header.pack(fill="x", padx=PAD_X, pady=(TOP_PAD, 0))
+         try:
+             self.header.pack_propagate(False)
+         except Exception:
+@@ -275,7 +297,7 @@ class App(SettingsWindowMixin):
+             takefocus=0,
+             highlightthickness=0,
+         )
+-        self.close_btn.pack(side="right")
++        self.close_btn.pack(side="right", padx=(px(4), 0))
+         self.copy_btn = tk.Button(
+             self.header,
+             image=self._copy_img,
+@@ -290,7 +312,7 @@ class App(SettingsWindowMixin):
+             takefocus=0,
+             highlightthickness=0,
+         )
+-        self.copy_btn.pack(side="right", padx=(0, 2))
++        self.copy_btn.pack(side="right", padx=(0, px(8)))
+         self.copy_btn.bind("<Enter>", lambda e: self._tip_show("复制译文", e))
+         self.copy_btn.bind("<Leave>", self._tip_hide)
+         self.close_btn.bind("<Enter>", lambda e: self._tip_show("关闭", e))
+@@ -317,13 +339,17 @@ class App(SettingsWindowMixin):
+             takefocus=0,
+             highlightthickness=0,
+         )
+-        self.pin_btn.pack(side="right", padx=(0, 2))
++        self.pin_btn.pack(side="right", padx=(0, px(2)))
+         self.pin_btn.bind("<Enter>", self._pin_hover_in)
+         self.pin_btn.bind("<Leave>", self._pin_hover_out)
+ 
+-        # ---- 译文（上） ----
++        # ---- 译文（上）：外层容器容纳细滚动条 ----
++        self.dst_wrap = tk.Frame(self.card, background=CARD_BG)
++        self.dst_wrap.pack(
++            fill="both", expand=True, padx=PAD_X, pady=(GAP_AFTER_HEADER, 0)
++        )
+         self.dst_text = tk.Text(
+-            self.card,
++            self.dst_wrap,
+             height=5,
+             font=FONT,
+             wrap="word",
+@@ -332,19 +358,50 @@ class App(SettingsWindowMixin):
+             highlightthickness=0,
+             background=CARD_BG,
+             foreground=MAIN_FG,
+-            spacing1=4,
+-            spacing2=2,
+-            spacing3=6,
+-            padx=4,
+-            pady=2,
++            spacing1=px(4),
++            spacing2=px(2),
++            spacing3=px(6),
++            padx=px(4),
++            pady=px(2),
++        )
++        self.dst_text.grid(row=0, column=0, sticky="nsew")
++        self.dst_wrap.grid_rowconfigure(0, weight=1)
++        self.dst_wrap.grid_columnconfigure(0, weight=1)
++        self.dst_bar = tk.Frame(
++            self.dst_wrap, bg=CARD_BG, width=px(6), bd=0,
++            highlightthickness=0, cursor="arrow",
++        )
++        self.dst_thumb = tk.Frame(
++            self.dst_bar, bg=SCROLL_THUMB, bd=0, highlightthickness=0,
++            cursor="hand2",
++        )
++        self.dst_thumb.bind("<Enter>", lambda _e: self.dst_thumb.configure(bg=SCROLL_ACTIVE))
++        self.dst_thumb.bind("<Leave>", lambda _e: self.dst_thumb.configure(bg=SCROLL_THUMB))
++        self.dst_bar.bind("<Button-1>", self._bar_jump)
++        self.dst_bar.bind("<B1-Motion>", self._bar_jump)
++        self.dst_thumb.bind("<Button-1>", self._bar_jump)
++        self.dst_thumb.bind("<B1-Motion>", self._bar_jump)
++        self.dst_bar.grid(row=0, column=1, sticky="ns")
++        self.dst_bar.grid_remove()
++        self.dst_text.configure(yscrollcommand=self._on_dst_scroll)
++        self.empty_hint = tk.Label(
++            self.dst_wrap,
++            text="复制英文后轻点 Ctrl\n也可以在下面原文框输入英文",
++            justify="center", font=SRC_FONT, fg=FAINT_FG, bg=CARD_BG,
++        )
++        self.empty_hint.bind(
++            "<Button-1>", lambda _e: (self.src_text.focus_set(), "break")[-1]
+         )
+-        self.dst_text.pack(fill="both", expand=True, padx=PAD_X, pady=(8, 0))
++        try:
++            self.dst_text.configure(state="disabled")
++        except Exception:
++            pass
+ 
+         # 可拖动的细分隔线：平时 1px 淡线，鼠标上去变深，拖它调两边高度
+-        self.divider = tk.Frame(self.card, background=CARD_BG, height=9, cursor="sb_v_double_arrow")
+-        self.divider.pack(fill="x", pady=(22, 0))
++        self.divider = tk.Frame(self.card, background=CARD_BG, height=DIV_H, cursor="sb_v_double_arrow")
++        self.divider.pack(fill="x", pady=(GAP_BEFORE_DIV, 0))
+         self.div_line = tk.Frame(self.divider, background=LINE, height=1)
+-        self.div_line.pack(fill="x", padx=PAD_X, pady=4)
++        self.div_line.pack(fill="x", padx=PAD_X, pady=px(4))
+         for 部件 in (self.divider, self.div_line):
+             部件.bind("<Enter>", self._div_hover_in)
+             部件.bind("<Leave>", self._div_hover_out)
+@@ -355,7 +412,7 @@ class App(SettingsWindowMixin):
+ 
+         # ---- “原文”行：标签左，箭头右 ----
+         self.src_head = tk.Frame(self.card, background=CARD_BG)
+-        self.src_head.pack(fill="x", padx=PAD_X, pady=(14, 0))
++        self.src_head.pack(fill="x", padx=PAD_X, pady=(GAP_AFTER_DIV, 0))
+         self.src_label = tk.Label(
+             self.src_head,
+             text="原文",
+@@ -393,27 +450,27 @@ class App(SettingsWindowMixin):
+         self.src_text = tk.Text(
+             self.card,
+             height=3,
+-            font=SRC_FONT,
++            font=EN_FONT,
+             wrap="word",
+             relief="flat",
+             borderwidth=0,
+             highlightthickness=0,
+             background=CARD_BG,
+             foreground=SUB_FG,
+-            spacing1=2,
+-            spacing2=2,
+-            spacing3=2,
+-            padx=4,
+-            pady=2,
++            spacing1=px(2),
++            spacing2=px(2),
++            spacing3=px(2),
++            padx=px(4),
++            pady=px(2),
+         )
+-        self.src_text.pack(fill="x", padx=PAD_X, pady=(6, 0))
++        self.src_text.pack(fill="x", padx=PAD_X, pady=(GAP_AFTER_LABEL, 0))
+         self.src_text.bind("<MouseWheel>", lambda 事件: self._滚轮(self.src_text, 事件))
+         self.src_text.bind("<Return>", self._on_src_return)
+         self.dst_text.bind("<MouseWheel>", lambda 事件: self._滚轮(self.dst_text, 事件))
+ 
+         # ---- 底栏 32px：翻译按钮左锚定，齿轮右贴边 ----
+-        self.footer = tk.Frame(self.card, background=CARD_BG, height=32)
+-        self.footer.pack(fill="x", padx=PAD_X, pady=(10, 18))
++        self.footer = tk.Frame(self.card, background=CARD_BG, height=FOOTER_H)
++        self.footer.pack(fill="x", padx=PAD_X, pady=(GAP_BEFORE_FOOTER, BOTTOM_PAD))
+         try:
+             self.footer.pack_propagate(False)
+         except Exception:
+@@ -439,8 +496,8 @@ class App(SettingsWindowMixin):
+             activeforeground="#ffffff",
+             font=("微软雅黑", 11),
+             cursor="hand2",
+-            width=96,
+-            height=32,
++            width=px(96),
++            height=px(32),
+             takefocus=0,
+             highlightthickness=0,
+             padx=0,
+@@ -460,7 +517,7 @@ class App(SettingsWindowMixin):
+         self.translate_btn.bind("<ButtonPress-1>", lambda _e: self._primary_set("press"))
+         self.translate_btn.bind("<ButtonRelease-1>", lambda _e: self._primary_set("hover"))
+         try:
+-            self._gear_img = _make_gear_image(32)
++            self._gear_img = _make_gear_image(px(32))
+         except Exception:
+             self._gear_img = None
+         self.config_btn = tk.Button(
+@@ -471,13 +528,13 @@ class App(SettingsWindowMixin):
+             relief="flat",
+             bd=0,
+             bg=CARD_BG,
+-            fg=SUB_FG,
++            fg=ICON_FG,
+             font=("微软雅黑", 13),
+             activebackground=HOVER_BG,
+-            activeforeground=SUB_FG,
++            activeforeground=ICON_FG,
+             cursor="hand2",
+-            width=32,
+-            height=32,
++            width=px(32),
++            height=px(32),
+             takefocus=0,
+             highlightthickness=0,
+         )
+@@ -487,11 +544,13 @@ class App(SettingsWindowMixin):
+ 
+         self._make_corners()
+         self._make_resize_zone()
++        self._make_width_zones()
+ 
+         if not CORE_OK:
+-            self.dst_text.insert("1.0", "正在等待核心模块，请稍后再试（不要关闭）。")
++            self._dst_set("正在等待核心模块，请稍后再试（不要关闭）。")
+ 
+         # 初始 360 高可能装不下新字体的 chrome：启动就一次兜底，免得按钮行被挤没
++        self._sync_empty_hint()
+         self._ensure_fits()
+         self._place_top_right()
+ 
+@@ -749,9 +808,9 @@ class App(SettingsWindowMixin):
+             return
+         try:
+             高 = int(self._window_h)
+-            宽 = WIN_W
+-            边 = 13
+-            外 = 8
++            宽 = int(self._window_w)
++            边 = px(13)
++            外 = MARGIN
+             位置 = {
+                 "tl": (外, 外),
+                 "tr": (宽 - 外 - 边, 外),
+@@ -789,7 +848,7 @@ class App(SettingsWindowMixin):
+         except Exception:
+             self._bottom_line = None
+         try:
+-            self._grip_img = _make_grip_image(16)
++            self._grip_img = _make_grip_image(px(16))
+         except Exception:
+             self._grip_img = None
+         try:
+@@ -825,17 +884,90 @@ class App(SettingsWindowMixin):
+             pass
+         self._place_resize()
+ 
++    def _make_width_zones(self):
++        """左右两边可横拖调宽；透明边上看得到 size_we 光标，拖起来和底边一致。"""
++        self._width_zones = []
++        for 边 in ("left", "right"):
++            try:
++                z = tk.Frame(
++                    self.root, background=CARD_BG, bd=0,
++                    highlightthickness=0, cursor="size_we",
++                )
++            except Exception:
++                continue
++            功能 = self._width_press_l if 边 == "left" else self._width_press_r
++            z.bind("<ButtonPress-1>", 功能)
++            z.bind("<B1-Motion>", self._width_drag)
++            z.bind("<ButtonRelease-1>", self._width_release)
++            self._width_zones.append((边, z))
++        self._place_resize()
++
++    def _width_press_l(self, 事件):
++        self._resize_w = True
++        self._width_side = "left"
++        self._width_x0 = float(事件.x_root)
++        self._width_w0 = int(self._window_w)
++        self._width_win_x = int(self.root.winfo_x())
++        self._width_win_y = int(self.root.winfo_y())
++
++    def _width_press_r(self, 事件):
++        self._resize_w = True
++        self._width_side = "right"
++        self._width_x0 = float(事件.x_root)
++        self._width_w0 = int(self._window_w)
++        self._width_win_x = int(self.root.winfo_x())
++        self._width_win_y = int(self.root.winfo_y())
++
++    def _width_drag(self, 事件):
++        if not self._resize_w or self._width_x0 is None or self._width_w0 is None:
++            return
++        try:
++            位移 = float(事件.x_root) - self._width_x0
++            屏宽 = int(self.root.winfo_screenwidth())
++            x0 = int(getattr(self, "_width_win_x", self.root.winfo_x()))
++            y0 = int(getattr(self, "_width_win_y", self.root.winfo_y()))
++            上限 = min(int(屏宽 * 0.6), px(760))
++            if getattr(self, "_width_side", "right") == "right":
++                新宽 = max(px(320), min(int(self._width_w0 + 位移), 上限))
++                新宽 = min(新宽, 屏宽 - x0)
++                新x = x0
++            else:
++                新宽 = max(px(320), min(int(self._width_w0 - 位移), 上限))
++                新x = max(0, x0 + self._width_w0 - 新宽)
++                新宽 = min(新宽, x0 + self._width_w0 - 新x)
++            if 新宽 != self._window_w or 新x != self.root.winfo_x():
++                self._window_w = 新宽
++                self._user_moved = True
++                self.root.geometry(f"{新宽}x{self._window_h}+{新x}+{y0}")
++                self._place_corners()
++                self._place_resize()
++        except Exception:
++            pass
++
++    def _width_release(self, _事件=None):
++        拖动过 = self._resize_w
++        self._resize_w = False
++        self._width_x0 = None
++        self._width_w0 = None
++        if not 拖动过:
++            return
++        try:
++            self._refit()
++            self._place_keep_or_top()
++        except Exception:
++            pass
++
+     def _place_resize(self):
+         """底边条夹在左右圆角之间，手柄贴右下空隙；窗口变高时跟着走。"""
+         try:
+             高 = int(self._window_h)
+         except Exception:
+             return
+-        宽 = WIN_W
++        宽 = int(self._window_w)
+         try:
+             if self._resize_zone is not None:
+-                self._resize_zone.place(x=8 + 13, y=高 - 8 - 12,
+-                                        width=宽 - 16 - 26, height=11)
++                self._resize_zone.place(x=MARGIN + px(13), y=高 - MARGIN - px(12),
++                                        width=宽 - 2 * MARGIN - px(26), height=px(11))
+                 try:
+                     self._resize_zone.lift()
+                 except Exception:
+@@ -844,18 +976,34 @@ class App(SettingsWindowMixin):
+             pass
+         try:
+             if self._bottom_line is not None:
+-                self._bottom_line.place(x=8 + 13, y=高 - 8 - 1,
+-                                         width=宽 - 16 - 26, height=1)
++                self._bottom_line.place(x=MARGIN + px(13), y=高 - MARGIN - 1,
++                                         width=宽 - 2 * MARGIN - px(26), height=1)
+                 try:
+                     self._bottom_line.lift()
+                 except Exception:
+                     pass
+         except Exception:
+             pass
++        try:
++            for 边, z in getattr(self, "_width_zones", []):
++                上 = MARGIN + px(13)
++                高边 = max(px(40), 高 - 2 * MARGIN - 2 * px(13))
++                # 透明边上的像素会被 Windows 色键穿透，点不到；
++                # 所以热区放在卡片内部 6px，和卡片同色，看起来没有、点得到。
++                if 边 == "left":
++                    z.place(x=MARGIN + 1, y=上, width=px(6), height=高边)
++                else:
++                    z.place(x=宽 - MARGIN - 1 - px(6), y=上, width=px(6), height=高边)
++                try:
++                    z.lift()
++                except Exception:
++                    pass
++        except Exception:
++            pass
+         try:
+             if self.grip is not None:
+-                self.grip.place(x=宽 - 8 - 18 - 16, y=高 - 8 - 18 + 1,
+-                                width=16, height=16)
++                self.grip.place(x=宽 - MARGIN - px(18) - px(16), y=高 - MARGIN - px(18) + 1,
++                                width=px(16), height=px(16))
+                 try:
+                     self.grip.lift()
+                 except Exception:
+@@ -882,7 +1030,7 @@ class App(SettingsWindowMixin):
+             )
+             if 新高 != self._window_h:
+                 self._window_h = 新高
+-                self.root.geometry(f"{WIN_W}x{新高}")
++                self.root.geometry(f"{self._window_w}x{新高}")
+                 self._fit_panes()
+                 self._place_corners()
+         except Exception:
+@@ -895,7 +1043,7 @@ class App(SettingsWindowMixin):
+             self.dst_text.configure(height=5)
+             self._auto_split()
+             self.root.update_idletasks()
+-            可用 = int(self._window_h) - 16
++            可用 = int(self._window_h) - 2 * MARGIN
+             for 框 in (self.dst_text, self.src_text):
+                 while (
+                     self.card.winfo_reqheight() > 可用
+@@ -916,6 +1064,72 @@ class App(SettingsWindowMixin):
+         self._resize_y0 = None
+         self._resize_h0 = None
+ 
++    def _on_dst_scroll(self, 首, 末):
++        """译文超出可视范围才露出细滚动条；没超出就藏起来，少占地方。"""
++        try:
++            首, 末 = float(首), float(末)
++            self.dst_thumb.place(
++                relx=0, rely=首, relwidth=1,
++                relheight=max(0.06, min(1.0, 末 - 首)),
++            )
++            溢出 = 首 > 0.0001 or 末 < 0.9999
++            if not 溢出 and float(末) >= 0.999:
++                溢出 = False
++            露着 = bool(self.dst_bar.winfo_ismapped())
++            if 溢出 and not 露着:
++                self.dst_bar.grid()
++            elif not 溢出 and 露着 and 末 >= 0.9999 and 首 <= 0.0001:
++                self.dst_bar.grid_remove()
++        except Exception:
++            pass
++
++    def _bar_jump(self, 事件):
++        """点/拖轨道：把可视区中心移到指针处。"""
++        try:
++            高 = max(1, self.dst_bar.winfo_height())
++            轨顶 = int(self.dst_bar.winfo_rooty())
++            位置 = max(0.0, min(1.0, (float(事件.y_root) - 轨顶) / 高))
++            首, 末 = self.dst_text.yview()
++            半 = max(0.0, (float(末) - float(首)) / 2)
++            self.dst_text.yview_moveto(max(0.0, min(1.0, 位置 - 半)))
++            return "break"
++        except Exception:
++            return "break"
++
++    def _sync_empty_hint(self):
++        """译文区没字时浮一句引导；有字就收起来。"""
++        try:
++            有字 = bool(self.dst_text.get("1.0", "end").strip())
++            if 有字:
++                self.empty_hint.place_forget()
++            else:
++                self.empty_hint.place(relx=0.5, rely=0.5, anchor="center")
++                self.empty_hint.lift()
++        except Exception:
++            pass
++
++    def _dst_edit(self, 动作):
++        """译文区平时只读（能选中、能复制），写内容时临时解锁。"""
++        try:
++            self.dst_text.configure(state="normal")
++        except Exception:
++            pass
++        try:
++            动作()
++        finally:
++            try:
++                self.dst_text.configure(state="disabled")
++            except Exception:
++                pass
++            self._sync_empty_hint()
++
++    def _dst_set(self, 文本):
++        def 写():
++            self.dst_text.delete("1.0", "end")
++            self.dst_text.insert("1.0", 文本)
++
++        self._dst_edit(写)
++
+     def _primary_set(self, 状态):
+         try:
+             img = self._primary_imgs.get(状态)
+@@ -971,8 +1185,8 @@ class App(SettingsWindowMixin):
+     def _place_top_right(self):
+         try:
+             sw = self.root.winfo_screenwidth()
+-            x = max(0, sw - WIN_W - 24)
+-            self.root.geometry(f"{WIN_W}x{self._window_h}+{x}+48")
++            x = max(0, sw - self._window_w - px(24))
++            self.root.geometry(f"{self._window_w}x{self._window_h}+{x}+{px(48)}")
+         except Exception:
+             pass
+ 
+@@ -981,12 +1195,12 @@ class App(SettingsWindowMixin):
+         if getattr(self, "_user_moved", False):
+             try:
+                 高 = int(self._window_h)
+-                self.root.geometry(f"{WIN_W}x{高}")
++                self.root.geometry(f"{self._window_w}x{高}")
+                 try:
+                     屏高 = int(self.root.winfo_screenheight())
+                     if self.root.winfo_y() + 高 > 屏高:
+                         self.root.geometry(
+-                            f"{WIN_W}x{高}+{self.root.winfo_x()}+{max(0, 屏高 - 高)}"
++                            f"{self._window_w}x{高}+{self.root.winfo_x()}+{max(0, 屏高 - 高)}"
+                         )
+                 except Exception:
+                     pass
+@@ -1339,17 +1553,14 @@ class App(SettingsWindowMixin):
+         if self._cancel_event is not None:
+             self._cancel_event.set()
+         self._cancel_event = None
+-        self.dst_text.delete("1.0", "end")
+-        self.dst_text.insert("1.0", "翻译中，请稍等…")
++        self._dst_set("翻译中，请稍等…")
+         if not CORE_OK or run_intent is None:
+             self.popup()
+-            self.dst_text.delete("1.0", "end")
+-            self.dst_text.insert("1.0", "正在等待核心模块，请稍后再点一次。")
++            self._dst_set("正在等待核心模块，请稍后再点一次。")
+             return
+         if self._need_config():
+             self.popup()
+-            self.dst_text.delete("1.0", "end")
+-            self.dst_text.insert("1.0", "请先点右上角的配置按钮，填好钥匙并保存，然后再翻译。")
++            self._dst_set("请先点右上角的配置按钮，填好钥匙并保存，然后再翻译。")
+             return
+         取消 = threading.Event()
+         self._cancel_event = 取消
+@@ -1386,8 +1597,7 @@ class App(SettingsWindowMixin):
+         if self._popup_on_first_chunk:
+             self._popup_on_first_chunk = False
+             self.popup()
+-        self.dst_text.delete("1.0", "end")
+-        self.dst_text.insert("1.0", 文本)
++        self._dst_set(文本)
+         self.dst_text.see("1.0")
+ 
+     def _finish_intent(self, 请求号, 结果):
+@@ -1401,44 +1611,51 @@ class App(SettingsWindowMixin):
+         try:
+             self.dst_text.tag_config("词", font=WORD_FONT, foreground=MAIN_FG)
+             self.dst_text.tag_config("音标", font=PHON_FONT, foreground=FAINT_FG)
+-            self.dst_text.tag_config("词性", font=POS_FONT, foreground=ACCENT)
++            self.dst_text.tag_config("词性", font=POS_FONT, foreground=ACCENT_TEXT)
+             self.dst_text.tag_config("释义", font=FONT, foreground=MAIN_FG)
+-            self.dst_text.tag_config("例英", font=SRC_FONT, foreground="#323130", lmargin1=16, lmargin2=16)
+-            self.dst_text.tag_config("例中", font=SRC_FONT, foreground=SUB_FG, lmargin1=16, lmargin2=16)
+-        except Exception:
+-            pass
+-        self.dst_text.delete("1.0", "end")
+-        try:
+-            词 = str(结果.word).strip()
+-            英音 = str(结果.uk).strip()
+-            美音 = str(结果.us).strip()
+-            self.dst_text.insert("end", 词 + "  ", "词")
+-            音标行 = " ".join(p for p in [f"英 {英音}" if 英音 else "", f"美 {美音}" if 美音 else ""] if p)
+-            if 音标行:
+-                self.dst_text.insert("end", 音标行, "音标")
+-            self.dst_text.insert("end", "\n\n")
+-            序号 = 0
+-            for 义项 in (结果.senses or []):
+-                词性 = str(义项.get("pos", "")).strip()
+-                意思 = [str(m).strip() for m in (义项.get("defs", []) or []) if str(m).strip()]
+-                if 词性 or 意思:
+-                    if 词性:
+-                        self.dst_text.insert("end", 词性 + " ", "词性")
+-                    if 意思:
+-                        self.dst_text.insert("end", "；".join(意思), "释义")
+-                    self.dst_text.insert("end", "\n")
+-                for 例 in (义项.get("examples", []) or []):
+-                    序号 += 1
+-                    英 = str(例.get("en", "")).strip()
+-                    中 = str(例.get("zh", "")).strip()
+-                    if 英:
+-                        self.dst_text.insert("end", f"例{序号}  {英}\n", "例英")
+-                    if 中:
+-                        self.dst_text.insert("end", f"       {中}\n", "例中")
+-                self.dst_text.insert("end", "\n")
++            self.dst_text.tag_config("例英", font=EN_FONT, foreground=EXAMPLE_FG, lmargin1=px(16), lmargin2=px(16))
++            self.dst_text.tag_config("例中", font=SRC_FONT, foreground=SUB_FG, lmargin1=px(16), lmargin2=px(16))
+         except Exception:
++            pass
++
++        def 写():
+             self.dst_text.delete("1.0", "end")
+-            self.dst_text.insert("1.0", str(结果))
++            try:
++                词 = str(结果.word).strip()
++                英音 = str(结果.uk).strip()
++                美音 = str(结果.us).strip()
++                self.dst_text.insert("end", 词 + "\n", "词")
++                # 音标各自独占一行：挤在一行会在"美"和音标之间断行
++                if 英音:
++                    self.dst_text.insert("end", f"英 {英音}\n", "音标")
++                if 美音:
++                    self.dst_text.insert("end", f"美 {美音}\n", "音标")
++                self.dst_text.insert("end", "\n")
++                序号 = 0
++                for 义项 in (结果.senses or []):
++                    词性 = str(义项.get("pos", "")).strip()
++                    意思 = [str(m).strip() for m in (义项.get("defs", []) or []) if str(m).strip()]
++                    if 词性 or 意思:
++                        if 词性:
++                            self.dst_text.insert("end", 词性 + " ", "词性")
++                        if 意思:
++                            self.dst_text.insert("end", "；".join(意思), "释义")
++                        self.dst_text.insert("end", "\n")
++                    for 例 in (义项.get("examples", []) or []):
++                        序号 += 1
++                        英 = str(例.get("en", "")).strip()
++                        中 = str(例.get("zh", "")).strip()
++                        if 英:
++                            self.dst_text.insert("end", f"例{序号}  {英}\n", "例英")
++                        if 中:
++                            self.dst_text.insert("end", f"       {中}\n", "例中")
++                    self.dst_text.insert("end", "\n")
++            except Exception:
++                self.dst_text.delete("1.0", "end")
++                self.dst_text.insert("1.0", str(结果))
++
++        self._dst_edit(写)
++
+         self._source_expanded = False
+         self._source_compact_lines = 1
+         try:
+@@ -1480,7 +1697,7 @@ class App(SettingsWindowMixin):
+ 
+     def _div_hover_in(self, _事件=None):
+         try:
+-            self.div_line.configure(background="#B3D7F5")
++            self.div_line.configure(background=DIV_HOVER)
+         except Exception:
+             pass
+ 
+@@ -1518,8 +1735,7 @@ class App(SettingsWindowMixin):
+ 
+     def _show_text(self, 文本):
+         self._source_compact_lines = 3
+-        self.dst_text.delete("1.0", "end")
+-        self.dst_text.insert("1.0", 文本 or "没有拿到翻译结果")
++        self._dst_set(文本 or "没有拿到翻译结果")
+         self.dst_text.see("1.0")
+         # 先弹出来再分：藏着时量不到高，自动分会被跳过
+         self.popup()
+diff --git a/evidence/arch-notes.log b/evidence/arch-notes.log
+new file mode 100644
+index 0000000..371b09c
+--- /dev/null
++++ b/evidence/arch-notes.log
+@@ -0,0 +1,20 @@
++2026-11-02T10:28:22	结构变化：
++    ??  tests/test_settings_guard.py
++    ??  translator_scale.py
++2026-11-02T10:44:44	结构变化：
++    ??  tests/test_settings_guard.py
++    ??  translator_scale.py
++2026-11-02T11:03:38	结构变化：
++    ??  tests/test_settings_guard.py
++    ??  tests/test_settings_list.py
++    ??  translator_scale.py
++2026-11-02T11:24:04	结构变化：
++    ??  tests/test_p2.py
++    ??  tests/test_settings_guard.py
++    ??  tests/test_settings_list.py
++    ??  translator_scale.py
++2026-11-02T12:05:59	结构变化：
++    ??  tests/test_p2.py
++    ??  tests/test_settings_guard.py
++    ??  tests/test_settings_list.py
++    ??  translator_scale.py
+diff --git a/evidence/audit-shots.py b/evidence/audit-shots.py
+new file mode 100644
+index 0000000..ef268e0
+--- /dev/null
++++ b/evidence/audit-shots.py
+@@ -0,0 +1,112 @@
++"""UI 审核用截图：主窗翻译 / 词典 / 状态提示 / 配置窗 / 悬停气泡。"""
++import ctypes
++import os
++import sys
++import time
++
++BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++sys.path.insert(0, BASE)
++os.chdir(BASE)
++OUT = os.path.join(BASE, "evidence", "audit")
++
++try:
++    ctypes.windll.shcore.SetProcessDpiAwareness(1)
++except Exception:
++    pass
++
++import app as appmod
++from PIL import ImageGrab
++from translator_domain import Definition
++
++appmod.App._start_trigger = lambda self: None
++appmod.App._start_tray = lambda self: None
++appmod.App._start_singleton_server = lambda self: None
++
++os.makedirs(OUT, exist_ok=True)
++
++
++def grab(root, name):
++    hwnd = ctypes.windll.user32.GetAncestor(root.winfo_id(), 2)
++    rect = (ctypes.c_long * 4)()
++    ctypes.windll.user32.GetWindowRect(hwnd, rect)
++    图 = ImageGrab.grab(bbox=(rect[0], rect[1], rect[2], rect[3]))
++    图.save(os.path.join(OUT, name))
++    print("saved", name, 图.size)
++
++
++a = appmod.App()
++a.root.deiconify()
++a._place_top_right()
++a.root.update()
++
++# 1. 长翻译
++a.src_text.delete("1.0", "end")
++a.src_text.insert("1.0", "One concern: copy buttons that look like links are a significant change. The actual app needs a visual check.")
++a._dst_set("有个担心：长得像链接的复制按钮是个大变化，实际界面必须肉眼检查一次，因为几何检查判断不了美丑。设计故意极简，应该看起来安静透气。")
++a.popup()
++a.root.update()
++a._refit()
++a.root.update()
++time.sleep(0.3)
++grab(a.root, "01-main-translate.png")
++
++# 2. 状态提示
++a._say_transient("译文已复制，去别处粘贴就行")
++a.root.update()
++time.sleep(0.2)
++grab(a.root, "02-main-status.png")
++a._status_hide()
++
++# 3. 词典
++定义 = Definition(
++    word="resilience",
++    uk="/rɪˈzɪliəns/",
++    us="/rɪˈzɪliəns/",
++    senses=[
++        {"pos": "n.", "defs": ["恢复力，韧性", "弹性"], "examples": [
++            {"en": "She showed great resilience in the face of failure.", "zh": "面对失败，她表现出极强的韧性。"}
++        ]},
++        {"pos": "n.", "defs": ["（材料）回弹性"], "examples": []},
++    ],
++)
++a._show_dict(定义)
++a.root.update()
++time.sleep(0.3)
++grab(a.root, "03-dict.png")
++
++# 4. 悬停气泡
++a._tip_show("拖动调高度", type("E", (), {"x_root": a.root.winfo_rootx() + 300, "y_root": a.root.winfo_rooty() + 330})())
++a.root.update()
++time.sleep(0.2)
++图 = None
++try:
++    上 = a._tip._窗
++    if 上 is not None:
++        上.update()
++        hwnd = ctypes.windll.user32.GetAncestor(上.winfo_id(), 2)
++        rect = (ctypes.c_long * 4)()
++        ctypes.windll.user32.GetWindowRect(hwnd, rect)
++        图 = ImageGrab.grab(bbox=(rect[0], rect[1], rect[2], rect[3]))
++        图.save(os.path.join(OUT, "04-tip.png"))
++        print("saved 04-tip.png", 图.size)
++except Exception as e:
++    print("tip shot failed", e)
++
++# 5. 配置窗
++a.open_settings()
++a.root.update()
++time.sleep(0.5)
++try:
++    窗 = a.settings_win
++    if 窗 is not None:
++        窗.update()
++        hwnd = ctypes.windll.user32.GetAncestor(窗.winfo_id(), 2)
++        rect = (ctypes.c_long * 4)()
++        ctypes.windll.user32.GetWindowRect(hwnd, rect)
++        图 = ImageGrab.grab(bbox=(rect[0], rect[1], rect[2], rect[3]))
++        图.save(os.path.join(OUT, "05-settings.png"))
++        print("saved 05-settings.png", 图.size)
++except Exception as e:
++    print("settings shot failed", e)
++
++a.on_quit()
+diff --git a/evidence/build-p2.log b/evidence/build-p2.log
+new file mode 100644
+index 0000000..4ec410e
+--- /dev/null
++++ b/evidence/build-p2.log
+@@ -0,0 +1,133 @@
++200 INFO: PyInstaller: 6.22.3, contrib hooks: 2026.9
++200 INFO: Python: 3.13.7
++231 INFO: Platform: Windows-10-10.0.18363-SP0
++231 INFO: Python environment: C:\Python313
++234 INFO: Removing temporary files and cleaning cache in C:\Users\Administrator\AppData\Local\pyinstaller
++243 INFO: Module search paths (PYTHONPATH):
++['D:\\10_project\\translator',
++ 'C:\\Python313\\python313.zip',
++ 'C:\\Python313\\DLLs',
++ 'C:\\Python313\\Lib',
++ 'C:\\Python313',
++ 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages',
++ 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\win32',
++ 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\win32\\lib',
++ 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\Pythonwin',
++ 'C:\\Python313\\Lib\\site-packages',
++ 'D:\\10_project\\translator']
++C:\Users\Administrator\AppData\Roaming\Python\Python313\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.7.0) or chardet (7.6.0)/charset_normalizer (3.4.4) doesn't match a supported version!
++  warnings.warn(
++1294 INFO: checking Analysis
++1295 INFO: Building Analysis because Analysis-00.toc is non existent
++1295 INFO: Looking for Python shared library...
++1295 INFO: Using Python shared library: C:\Python313\python313.dll
++1295 INFO: Running Analysis Analysis-00.toc
++1295 INFO: Target bytecode optimization level: 0
++1295 INFO: Initializing module dependency graph...
++1296 INFO: Initializing module graph hook caches...
++1318 INFO: Analyzing modules for base_library.zip ...
++2856 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++3367 INFO: Processing standard module hook 'hook-math.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++3656 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++5144 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++6880 INFO: Caching module dependency graph...
++6931 INFO: Analyzing D:\10_project\translator\app.py
++7047 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++7052 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
++7054 INFO: TclTkInfo: initializing cached Tcl/Tk info...
++7481 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++7529 INFO: Processing standard module hook 'hook-urllib3.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++7774 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++7775 INFO: SetuptoolsInfo: initializing cached setuptools info...
++8423 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
++8431 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++8488 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++8493 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++8564 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++8571 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++8571 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
++8587 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++8588 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
++8777 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++9184 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++9300 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++10188 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++10396 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++10398 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++10910 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++10910 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'!
++10982 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++11014 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++11014 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'!
++11384 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++11384 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
++12087 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++12087 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
++12892 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++13059 INFO: Processing standard module hook 'hook-chardet.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++13928 INFO: Processing standard module hook 'hook-cryptography.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++15110 INFO: hook-cryptography: cryptography does not seem to be using dynamically linked OpenSSL.
++15551 INFO: Processing standard module hook 'hook-certifi.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++15929 INFO: Processing standard module hook 'hook-pystray.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++16345 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++16421 INFO: Processing pre-safe-import-module hook 'hook-gi.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++16450 INFO: Processing standard module hook 'hook-PIL.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++16673 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++17066 INFO: Processing standard module hook 'hook-numpy.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++17743 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++18952 INFO: Processing standard module hook 'hook-webbrowser.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++19025 INFO: Processing standard module hook 'hook-psutil.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++21079 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++21335 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++21771 INFO: Processing module hooks (post-graph stage)...
++21780 WARNING: Hidden import "ascii__mypyc" not found!
++21781 WARNING: Hidden import "confusion__mypyc" not found!
++21781 WARNING: Hidden import "escape__mypyc" not found!
++21782 WARNING: Hidden import "language__mypyc" not found!
++21783 WARNING: Hidden import "magic__mypyc" not found!
++21783 WARNING: Hidden import "orchestrator__mypyc" not found!
++21784 WARNING: Hidden import "postprocess__mypyc" not found!
++21785 WARNING: Hidden import "statistical__mypyc" not found!
++21785 WARNING: Hidden import "structural__mypyc" not found!
++21786 WARNING: Hidden import "utf1632__mypyc" not found!
++21787 WARNING: Hidden import "utf8__mypyc" not found!
++21787 WARNING: Hidden import "validity__mypyc" not found!
++22329 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++22929 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++22945 INFO: Performing binary vs. data reclassification (952 entries)
++23075 INFO: Looking for ctypes DLLs
++24969 INFO: Analyzing run-time hooks ...
++24973 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
++24977 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
++24979 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
++24982 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
++24984 INFO: Including run-time hook 'pyi_rth_cryptography_openssl.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
++24985 INFO: Including run-time hook 'pyi_rth__tkinter.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
++25026 INFO: Creating base_library.zip...
++25051 INFO: Looking for dynamic libraries
++C:\Users\Administrator\AppData\Roaming\Python\Python313\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.7.0) or chardet (7.6.0)/charset_normalizer (3.4.4) doesn't match a supported version!
++  warnings.warn(
++26356 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\numpy.libs']
++26356 INFO: Extra DLL search directories (PATH): []
++27300 INFO: Warnings written to D:\10_project\translator\build\����С����\warn-����С����.txt
++27387 INFO: Graph cross-reference written to D:\10_project\translator\build\����С����\xref-����С����.html
++27438 INFO: checking PYZ
++27438 INFO: Building PYZ because PYZ-00.toc is non existent
++27438 INFO: Building PYZ (ZlibArchive) D:\10_project\translator\build\����С����\PYZ-00.pyz
++28412 INFO: Building PYZ (ZlibArchive) D:\10_project\translator\build\����С����\PYZ-00.pyz completed successfully.
++28449 INFO: checking PKG
++28449 INFO: Building PKG because PKG-00.toc is non existent
++28449 INFO: Building PKG (CArchive) ����С����.pkg
++39913 INFO: Building PKG (CArchive) ����С����.pkg completed successfully.
++39931 INFO: Bootloader C:\Users\Administrator\AppData\Roaming\Python\Python313\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
++39931 INFO: checking EXE
++39931 INFO: Building EXE because EXE-00.toc is non existent
++39931 INFO: Building EXE from EXE-00.toc
++39936 INFO: Copying bootloader EXE to D:\10_project\translator\dist\����С����.exe
++39944 INFO: Copying icon to EXE
++39948 INFO: Copying 0 resources to EXE
++39948 INFO: Embedding manifest in EXE
++39951 INFO: Appending PKG archive to EXE
++39975 INFO: Fixing EXE headers
++40191 INFO: Building EXE from EXE-00.toc completed successfully.
++40208 INFO: Build complete! The results are available in: D:\10_project\translator\dist
+diff --git a/evidence/build-ui2.log b/evidence/build-ui2.log
+new file mode 100644
+index 0000000..c677eaa
+--- /dev/null
++++ b/evidence/build-ui2.log
+@@ -0,0 +1,133 @@
++221 INFO: PyInstaller: 6.22.3, contrib hooks: 2026.9
++222 INFO: Python: 3.13.7
++261 INFO: Platform: Windows-10-10.0.18363-SP0
++261 INFO: Python environment: C:\Python313
++264 INFO: Removing temporary files and cleaning cache in C:\Users\Administrator\AppData\Local\pyinstaller
++274 INFO: Module search paths (PYTHONPATH):
++['D:\\10_project\\translator',
++ 'C:\\Python313\\python313.zip',
++ 'C:\\Python313\\DLLs',
++ 'C:\\Python313\\Lib',
++ 'C:\\Python313',
++ 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages',
++ 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\win32',
++ 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\win32\\lib',
++ 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\Pythonwin',
++ 'C:\\Python313\\Lib\\site-packages',
++ 'D:\\10_project\\translator']
++C:\Users\Administrator\AppData\Roaming\Python\Python313\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.7.0) or chardet (7.6.0)/charset_normalizer (3.4.4) doesn't match a supported version!
++  warnings.warn(
++1395 INFO: checking Analysis
++1395 INFO: Building Analysis because Analysis-00.toc is non existent
++1395 INFO: Looking for Python shared library...
++1395 INFO: Using Python shared library: C:\Python313\python313.dll
++1395 INFO: Running Analysis Analysis-00.toc
++1395 INFO: Target bytecode optimization level: 0
++1395 INFO: Initializing module dependency graph...
++1396 INFO: Initializing module graph hook caches...
++1414 INFO: Analyzing modules for base_library.zip ...
++2780 INFO: Processing standard module hook 'hook-math.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++2797 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++2949 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++5736 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++7404 INFO: Caching module dependency graph...
++7456 INFO: Analyzing D:\10_project\translator\app.py
++7565 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++7570 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
++7572 INFO: TclTkInfo: initializing cached Tcl/Tk info...
++8008 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++8057 INFO: Processing standard module hook 'hook-urllib3.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++8321 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++8322 INFO: SetuptoolsInfo: initializing cached setuptools info...
++8989 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
++9003 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++9075 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++9079 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++9155 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++9161 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++9162 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
++9180 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++9180 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
++9383 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++9825 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++9981 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++10947 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++11146 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++11148 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++11648 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++11648 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'!
++11718 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++11749 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++11749 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'!
++12111 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++12111 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
++12822 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++12822 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
++13556 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++13713 INFO: Processing standard module hook 'hook-chardet.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++14560 INFO: Processing standard module hook 'hook-cryptography.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++15741 INFO: hook-cryptography: cryptography does not seem to be using dynamically linked OpenSSL.
++16252 INFO: Processing standard module hook 'hook-certifi.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++16697 INFO: Processing standard module hook 'hook-pystray.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++17107 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++17175 INFO: Processing pre-safe-import-module hook 'hook-gi.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
++17199 INFO: Processing standard module hook 'hook-PIL.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++17429 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++17822 INFO: Processing standard module hook 'hook-numpy.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++18542 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++19768 INFO: Processing standard module hook 'hook-webbrowser.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++19840 INFO: Processing standard module hook 'hook-psutil.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
++21928 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++22180 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++22643 INFO: Processing module hooks (post-graph stage)...
++22652 WARNING: Hidden import "ascii__mypyc" not found!
++22652 WARNING: Hidden import "confusion__mypyc" not found!
++22653 WARNING: Hidden import "escape__mypyc" not found!
++22654 WARNING: Hidden import "language__mypyc" not found!
++22654 WARNING: Hidden import "magic__mypyc" not found!
++22655 WARNING: Hidden import "orchestrator__mypyc" not found!
++22655 WARNING: Hidden import "postprocess__mypyc" not found!
++22656 WARNING: Hidden import "statistical__mypyc" not found!
++22657 WARNING: Hidden import "structural__mypyc" not found!
++22658 WARNING: Hidden import "utf1632__mypyc" not found!
++22658 WARNING: Hidden import "utf8__mypyc" not found!
++22659 WARNING: Hidden import "validity__mypyc" not found!
++23238 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++23851 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks'
++23869 INFO: Performing binary vs. data reclassification (952 entries)
++23992 INFO: Looking for ctypes DLLs
++24095 INFO: Analyzing run-time hooks ...
++24099 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
++24102 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
++24105 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
++24108 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
++24109 INFO: Including run-time hook 'pyi_rth_cryptography_openssl.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
++24110 INFO: Including run-time hook 'pyi_rth__tkinter.py' from 'C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks'
++24148 INFO: Creating base_library.zip...
++24173 INFO: Looking for dynamic libraries
++C:\Users\Administrator\AppData\Roaming\Python\Python313\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.7.0) or chardet (7.6.0)/charset_normalizer (3.4.4) doesn't match a supported version!
++  warnings.warn(
++25406 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\Users\\Administrator\\AppData\\Roaming\\Python\\Python313\\site-packages\\numpy.libs']
++25406 INFO: Extra DLL search directories (PATH): []
++26330 INFO: Warnings written to D:\10_project\translator\build\����С����\warn-����С����.txt
++26413 INFO: Graph cross-reference written to D:\10_project\translator\build\����С����\xref-����С����.html
++26465 INFO: checking PYZ
++26465 INFO: Building PYZ because PYZ-00.toc is non existent
++26465 INFO: Building PYZ (ZlibArchive) D:\10_project\translator\build\����С����\PYZ-00.pyz
++27417 INFO: Building PYZ (ZlibArchive) D:\10_project\translator\build\����С����\PYZ-00.pyz completed successfully.
++27453 INFO: checking PKG
++27453 INFO: Building PKG because PKG-00.toc is non existent
++27453 INFO: Building PKG (CArchive) ����С����.pkg
++39117 INFO: Building PKG (CArchive) ����С����.pkg completed successfully.
++39133 INFO: Bootloader C:\Users\Administrator\AppData\Roaming\Python\Python313\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
++39133 INFO: checking EXE
++39133 INFO: Building EXE because EXE-00.toc is non existent
++39134 INFO: Building EXE from EXE-00.toc
++39138 INFO: Copying bootloader EXE to D:\10_project\translator\dist\����С����.exe
++39146 INFO: Copying icon to EXE
++39151 INFO: Copying 0 resources to EXE
++39151 INFO: Embedding manifest in EXE
++39155 INFO: Appending PKG archive to EXE
++39179 INFO: Fixing EXE headers
++39389 INFO: Building EXE from EXE-00.toc completed successfully.
++39406 INFO: Build complete! The results are available in: D:\10_project\translator\dist
+diff --git a/evidence/check-p2.py b/evidence/check-p2.py
+new file mode 100644
+index 0000000..059e351
+--- /dev/null
++++ b/evidence/check-p2.py
+@@ -0,0 +1,83 @@
++"""P2 验收脚本：空状态、滚动条、拖宽下限、深色/浅色调色板。任一项 FAIL 非零退出。"""
++import ctypes
++import os
++import subprocess
++import sys
++import time
++from types import SimpleNamespace
++
++BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++sys.path.insert(0, BASE)
++os.chdir(BASE)
++try:
++    ctypes.windll.shcore.SetProcessDpiAwareness(1)
++except Exception:
++    pass
++
++import app as appmod
++from translator_scale import px
++
++appmod.App._start_trigger = lambda self: None
++appmod.App._start_tray = lambda self: None
++appmod.App._start_singleton_server = lambda self: None
++
++结果 = []
++
++
++def 查(名, 通过, 明细=""):
++    结果.append(bool(通过))
++    print(("PASS " if 通过 else "FAIL ") + 名 + (f" [{明细}]" if 明细 else ""))
++
++
++a = appmod.App()
++a.popup()
++a.root.update()
++time.sleep(0.2)
++a.root.update()
++查("空状态引导可见", bool(a.empty_hint.winfo_ismapped()))
++
++a._dst_set("长译文。" * 200)
++a.root.update()
++time.sleep(0.3)
++a.root.update()
++查("长内容出现滚动条", bool(a.dst_bar.winfo_ismapped()), f"yview={a.dst_text.yview()}")
++查("滚动条很细", a.dst_bar.winfo_width() <= px(10), f"w={a.dst_bar.winfo_width()}")
++
++a._dst_set("短")
++a.root.update()
++time.sleep(0.2)
++a.root.update()
++查("短内容收起滚动条", not bool(a.dst_bar.winfo_ismapped()))
++查("有内容时引导隐藏", not bool(a.empty_hint.winfo_ismapped()))
++
++起 = a.root.winfo_width()
++x = float(a.root.winfo_rootx() + 起)
++a._width_press_r(SimpleNamespace(x_root=x))
++a._width_drag(SimpleNamespace(x_root=x + 120))
++a.root.update()
++查("右侧拖宽生效", a.root.winfo_width() > 起, f"{起}->{a.root.winfo_width()}")
++
++x2 = float(a.root.winfo_rootx() + a.root.winfo_width())
++a._width_press_r(SimpleNamespace(x_root=x2))
++a._width_drag(SimpleNamespace(x_root=x2 - 3000))
++a.root.update()
++查("拖宽有下限", a.root.winfo_width() == px(320), f"w={a.root.winfo_width()}")
++a._width_release()
++a.root.update()
++底 = int(px(8) + a.footer.winfo_y() + a.footer.winfo_height())
++查("拖宽后底栏不越界", 底 <= a.root.winfo_height(), f"底={底} 窗={a.root.winfo_height()}")
++a.on_quit()
++
++# 调色板：浅色与深色各跑一遍纯测试（含对比度）
++for 模式, 覆盖 in (("浅色", "light"), ("深色", "dark")):
++    env = dict(os.environ)
++    env["TRANSLATOR_THEME"] = 覆盖
++    r = subprocess.run(
++        [sys.executable, "-m", "unittest", "tests.test_p2", "-q"],
++        cwd=BASE, env=env, capture_output=True, text=True,
++    )
++    查(f"{模式}调色板与 P2 逻辑", r.returncode == 0,
++       (r.stderr or "").strip().splitlines()[-1] if r.returncode else "OK")
++
++print("ALL PASS" if all(结果) else f"FAILED {结果.count(False)}")
++sys.exit(0 if all(结果) else 1)
+diff --git a/evidence/check-round2.py b/evidence/check-round2.py
+new file mode 100644
+index 0000000..75fb953
+--- /dev/null
++++ b/evidence/check-round2.py
+@@ -0,0 +1,79 @@
++"""运行时验收：配置窗删除确认 / 关窗提醒 / 译文只读 / DPI 缩放。全部用假对话框，不碰真配置。"""
++import os
++import sys
++
++BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++sys.path.insert(0, BASE)
++os.chdir(BASE)
++
++import app as appmod
++import translator_settings_window as SW
++from translator_scale import UI_SCALE
++
++appmod.App._start_trigger = lambda self: None
++appmod.App._start_tray = lambda self: None
++appmod.App._start_singleton_server = lambda self: None
++
++结果 = []
++
++
++def 查(名, 通过, 明细=""):
++    结果.append(bool(通过))
++    print(("PASS " if 通过 else "FAIL ") + 名 + (f" [{明细}]" if 明细 else ""))
++
++
++a = appmod.App()
++a.root.deiconify()
++a.root.update()
++查("DPI 缩放系数已生效", abs(UI_SCALE - 1.25) < 0.01, f"scale={UI_SCALE}")
++查("窗口宽度按缩放放大", a.root.winfo_width() > 380, f"w={a.root.winfo_width()}")
++查("译文只读", str(a.dst_text.cget("state")) == "disabled")
++a._dst_set("只读也能写")
++查("程序写入正常", a.dst_text.get("1.0", "end-1c") == "只读也能写")
++查("译文区仍是只读", str(a.dst_text.cget("state")) == "disabled")
++try:
++    a.dst_text.insert("1.0", "X")  # 模拟用户/野代码直接写
++    用户写入生效 = a.dst_text.get("1.0", "end-1c").startswith("X")
++except Exception:
++    用户写入生效 = False
++查("非本类写入被拦住", not 用户写入生效)
++
++# 配置窗
++a.open_settings()
++a.root.update()
++win = a.settings_win
++查("配置窗已打开", win is not None and win.winfo_exists())
++查("配置窗锁定大小", win.resizable() == (0, 0), f"resizable={win.resizable()}")
++实际 = (win.winfo_width(), win.winfo_height())
++查("配置窗没有超出屏幕", 实际[1] <= win.winfo_screenheight() - 50, f"size={实际}")
++
++原_询问 = SW.messagebox.askyesno
++原_删除 = SW.delete_profile
++删记录 = []
++
++# 关窗提醒：有改动 + 点取消 → 窗口还在
++a._s_dirty = True
++SW.messagebox.askyesno = lambda *x, **k: False
++a._settings_close(win)
++a.root.update()
++查("关窗提醒：点取消窗口还在", bool(win.winfo_exists()))
++
++# 删除确认：点取消 → 不删
++a.prof_list.selection_clear(0, "end")
++a.prof_list.selection_set(0)
++选名 = a._selected_profile_name()
++SW.delete_profile = lambda 名: 删记录.append(名)
++a._settings_delete()
++查("删除确认：点取消不删", 删记录 == [], f"selected={选名} 记录={删记录}")
++
++SW.messagebox.askyesno = lambda *x, **k: True
++a._settings_close(win)
++a.root.update()
++查("确认后关窗成功", not win.winfo_exists())
++
++SW.messagebox.askyesno = 原_询问
++SW.delete_profile = 原_删除
++
++a.on_quit()
++print("ALL PASS" if all(结果) else f"FAILED {结果.count(False)}")
++sys.exit(0 if all(结果) else 1)
+diff --git a/evidence/check_layout.py b/evidence/check_layout.py
+index ac4d9f6..cd7315c 100644
+--- a/evidence/check_layout.py
++++ b/evidence/check_layout.py
+@@ -23,6 +23,8 @@ sys.path.insert(0, BASE)
+ os.chdir(BASE)
+ 
+ import app as appmod
++from translator_layout import FOOTER_H, MARGIN, WIN_W
++from translator_scale import px
+ from PIL import ImageGrab
+ 
+ FAILURES = 0
+@@ -68,7 +70,7 @@ a.root.update()
+ time.sleep(0.3)
+ 
+ # ---- 窗口基本形状 ----
+-check("窗口宽==380", a.root.winfo_width() == 380, f"w={a.root.winfo_width()}")
++check(f"窗口宽=={WIN_W}", a.root.winfo_width() == WIN_W, f"w={a.root.winfo_width()}")
+ try:
+     无边框 = bool(a.root.overrideredirect())
+ except Exception:
+@@ -85,25 +87,25 @@ a.status_var.set("译文已复制，去别处粘贴就行")
+ a._status_show()
+ a.root.update()
+ time.sleep(0.2)
+-check("状态显示时底栏==32", a.footer.winfo_height() == 32,
++check(f"状态显示时底栏=={FOOTER_H}", a.footer.winfo_height() == FOOTER_H,
+       f"footer_h={a.footer.winfo_height()}")
+-check("状态显示时翻译按钮==32", a.translate_btn.winfo_height() == 32,
++check(f"状态显示时翻译按钮=={FOOTER_H}", a.translate_btn.winfo_height() == FOOTER_H,
+       f"btn_h={a.translate_btn.winfo_height()}")
+ 
+ # ---- 状态条消失后底栏仍在 ----
+ a._status_hide()
+ a.root.update()
+ time.sleep(0.2)
+-check("状态隐藏后底栏==32", a.footer.winfo_height() == 32,
++check(f"状态隐藏后底栏=={FOOTER_H}", a.footer.winfo_height() == FOOTER_H,
+       f"footer_h={a.footer.winfo_height()}")
+-check("状态隐藏后翻译按钮==32", a.translate_btn.winfo_height() == 32,
++check(f"状态隐藏后翻译按钮=={FOOTER_H}", a.translate_btn.winfo_height() == FOOTER_H,
+       f"btn_h={a.translate_btn.winfo_height()}")
+ 
+ 
+ def check_corners(标签):
+     高 = a.root.winfo_height()
+-    底 = 高 - 8 - 13
+-    期望 = {"tl": 8, "tr": 8, "bl": 底, "br": 底}
++    底 = 高 - MARGIN - px(13)
++    期望 = {"tl": MARGIN, "tr": MARGIN, "bl": 底, "br": 底}
+     for 角 in ("tl", "tr", "bl", "br"):
+         实测 = a._corners[角].winfo_y()
+         check(f"角遮罩@{标签}/{角} y=={期望[角]}", 实测 == 期望[角],
+diff --git a/evidence/e2e-mouse.py b/evidence/e2e-mouse.py
+new file mode 100644
+index 0000000..a120f93
+--- /dev/null
++++ b/evidence/e2e-mouse.py
+@@ -0,0 +1,161 @@
++"""真实鼠标端到端：系统级按下/移动/抬起，验证拖宽与滚动条滑块。任一项 FAIL 退出非零。"""
++import ctypes
++import os
++import sys
++import time
++
++BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++sys.path.insert(0, BASE)
++os.chdir(BASE)
++try:
++    ctypes.windll.shcore.SetProcessDpiAwareness(1)
++except Exception:
++    pass
++
++import app as appmod
++from translator_scale import px
++
++appmod.App._start_trigger = lambda self: None
++appmod.App._start_tray = lambda self: None
++appmod.App._start_singleton_server = lambda self: None
++
++u = ctypes.windll.user32
++结果 = []
++
++
++def 查(名, 通过, 明细=""):
++    结果.append(bool(通过))
++    print(("PASS " if 通过 else "FAIL ") + 名 + (f" [{明细}]" if 明细 else ""))
++
++
++def 移到(x, y, 步=6, 间隔=0.012):
++    sx, sy = u.GetSystemMetrics(0), u.GetSystemMetrics(1)
++    x = max(0, min(int(x), sx - 1))
++    y = max(0, min(int(y), sy - 1))
++    u.SetCursorPos(x, y)
++    time.sleep(间隔)
++
++
++def 按下():
++    u.mouse_event(0x0002, 0, 0, 0, 0)
++    time.sleep(0.03)
++
++
++def 松开():
++    u.mouse_event(0x0004, 0, 0, 0, 0)
++    time.sleep(0.05)
++
++
++def 拖动(从, 到, 步=12):
++    x0, y0 = 从
++    移到(x0, y0)
++    按下()
++    try:
++        a.root.update()
++    except Exception:
++        pass
++    for i in range(1, 步 + 1):
++        移到(x0 + (到[0] - x0) * i / 步, y0 + (到[1] - y0) * i / 步)
++        try:
++            a.root.update()
++        except Exception:
++            pass
++    松开()
++    try:
++        a.root.update()
++    except Exception:
++        pass
++
++
++原鼠标 = None
++try:
++    点 = ctypes.wintypes.POINT()
++    u.GetCursorPos(ctypes.byref(点))
++    原鼠标 = (点.x, 点.y)
++except Exception:
++    pass
++
++a = appmod.App()
++a.src_text.delete("1.0", "end")
++a.src_text.insert("1.0", "Long enough source text for scrolling checks.")
++a._dst_set("这是一段很长的译文。" * 200)
++a.popup()
++a.root.update()
++time.sleep(0.4)
++a.root.update()
++
++wx, wy = int(a.root.winfo_rootx()), int(a.root.winfo_rooty())
++ww, wh = int(a.root.winfo_width()), int(a.root.winfo_height())
++高边 = wh // 2
++
++# ---- 右边拖宽（真实鼠标）----
++起宽 = a.root.winfo_width()
++右边x = wx + ww - px(8) - px(3)
++拖动((右边x, wy + 高边), (右边x + px(60), wy + 高边))
++a.root.update()
++time.sleep(0.2)
++加宽后 = a.root.winfo_width()
++查("真实鼠标拖右边能加宽", 加宽后 > 起宽, f"{起宽}->{加宽后}")
++右缘 = a.root.winfo_x() + a.root.winfo_width()
++查("右边缘不越出屏幕", 右缘 <= u.GetSystemMetrics(0), f"右缘={右缘}")
++
++# ---- 左边拖宽（右边缘应基本不动）----
++左缘前 = a.root.winfo_x() + a.root.winfo_width()
++左边x = a.root.winfo_rootx() + px(8) + px(3)
++拖动((左边x, a.root.winfo_rooty() + 高边), (左边x - px(50), a.root.winfo_rooty() + 高边))
++a.root.update()
++time.sleep(0.2)
++左缘后 = a.root.winfo_x() + a.root.winfo_width()
++查("真实鼠标拖左边能加宽", a.root.winfo_width() > 加宽后, f"{加宽后}->{a.root.winfo_width()}")
++查("拖左边时右边缘不动", abs(左缘后 - 左缘前) <= px(2), f"{左缘前}->{左缘后}")
++
++# ---- 滚动条滑块（真实鼠标）----
++a.root.update()
++time.sleep(0.3)
++a.root.update()
++可见 = bool(a.dst_bar.winfo_ismapped())
++查("长内容滚动条出现", 可见)
++if 可见:
++    前 = a.dst_text.yview()[0]
++    拇指x = a.dst_thumb.winfo_rootx() + a.dst_thumb.winfo_width() // 2
++    拇指y = a.dst_thumb.winfo_rooty() + a.dst_thumb.winfo_height() // 2
++    拖动((拇指x, 拇指y), (拇指x, 拇指y + 90))
++    a.root.update()
++    time.sleep(0.2)
++    后 = a.dst_text.yview()[0]
++    查("真实鼠标拖滑块能滚", 后 > 前 + 0.05, f"{前:.2f}->{后:.2f}")
++
++# ---- 轨道点击 ----
++if 可见:
++    轨x = a.dst_bar.winfo_rootx() + a.dst_bar.winfo_width() // 2
++    轨顶 = a.dst_bar.winfo_rooty()
++    轨高 = a.dst_bar.winfo_height()
++    前 = a.dst_text.yview()[0]
++    移到(轨x, 轨顶 + int(轨高 * 0.9))
++    按下()
++    松开()
++    a.root.update()
++    后 = a.dst_text.yview()[0]
++    查("点轨道能跳转", 后 > 前 + 0.1, f"{前:.2f}->{后:.2f}")
++
++# ---- 滚到中间再抓滑块（不能跳回顶部）----
++if 可见:
++    a.dst_text.yview_moveto(0.5)
++    a.root.update()
++    time.sleep(0.25)
++    a.root.update()
++    前 = a.dst_text.yview()[0]
++    拇指x = a.dst_thumb.winfo_rootx() + a.dst_thumb.winfo_width() // 2
++    拇指y = a.dst_thumb.winfo_rooty() + a.dst_thumb.winfo_height() // 2
++    拖动((拇指x, 拇指y), (拇指x, 拇指y + 40), 步=8)
++    a.root.update()
++    time.sleep(0.2)
++    后 = a.dst_text.yview()[0]
++    查("中间抓滑块不跳顶", 后 >= 前 - 0.02, f"{前:.2f}->{后:.2f}")
++
++a.on_quit()
++if 原鼠标:
++    u.SetCursorPos(*原鼠标)
++
++print("ALL PASS" if all(结果) else f"FAILED {结果.count(False)}")
++sys.exit(0 if all(结果) else 1)
+diff --git a/evidence/meta.json b/evidence/meta.json
+index 584389e..2400df5 100644
+--- a/evidence/meta.json
++++ b/evidence/meta.json
+@@ -1 +1 @@
+-{"level": "L2", "level_reason": "只改 app.py 单文件展示层拖拽下限逻辑，同模块可撤销，不碰接口与数据；先复现再修"}
++{"level": "L3", "review_required": true, "level_reason": "跨模块：P2 改动覆盖 theme（深色/浅色调色板、字体、图标底色）、app（自绘滚动条、空状态、宽度拖拽）、settings_window（测试连接、钥匙显隐、深色标题栏），新增深色主题分支；无对外接口与数据变更"}
+diff --git a/evidence/p2-redgreen.log b/evidence/p2-redgreen.log
+new file mode 100644
+index 0000000..c5be1ae
+--- /dev/null
++++ b/evidence/p2-redgreen.log
+@@ -0,0 +1,12 @@
++[红] 钥匙显隐：FAIL: test_点一下显示再点一下隐藏 (tests.test_p2.钥匙显隐.test_点一下显示再点一下隐藏)
++[绿] 钥匙显隐：恢复后 通过
++[红] 测试连接：FAIL: test_失败时给失败提示 (tests.test_p2.测试连接.test_失败时给失败提示)
++[绿] 测试连接：恢复后 通过
++[红] 调色板对比度：FAIL: test_当前模式文字和图标够清楚 (tests.test_p2.调色板对比度.test_当前模式文字和图标够清楚)
++[绿] 调色板对比度：恢复后 通过
++[红] 空状态：关掉实现后引导可见=False（应 False）
++[绿] 空状态：恢复后引导可见=True（应 True）
++[红] 滚动条：关掉实现后可见=False（应 False）
++[绿] 滚动条：恢复后可见=True（应 True）
++[红] 拖宽（热区在透明边）：475->475（应不变，证明点击穿透）
++[绿] 拖宽（热区在卡片内）：475->505（应变宽）
+diff --git a/evidence/p2-redgreen.py b/evidence/p2-redgreen.py
+new file mode 100644
+index 0000000..9883423
+--- /dev/null
++++ b/evidence/p2-redgreen.py
+@@ -0,0 +1,178 @@
++"""P2 红→绿记录：先制造旧行为/关掉实现跑出红，再恢复跑出绿。"""
++import ctypes
++import io
++import os
++import sys
++import time
++import unittest
++from types import SimpleNamespace
++
++BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++sys.path.insert(0, BASE)
++os.chdir(BASE)
++try:
++    ctypes.windll.shcore.SetProcessDpiAwareness(1)
++except Exception:
++    pass
++
++import app as A
++import translator_settings_window as SW
++import translator_theme as T
++from translator_layout import MARGIN
++
++A.App._start_trigger = lambda s: None
++A.App._start_tray = lambda s: None
++A.App._start_singleton_server = lambda s: None
++
++行 = []
++
++
++def 记(标签, 文字):
++    行.append(f"[{标签}] {文字}")
++    print(f"[{标签}] {文字}")
++
++
++def 跑单测(名):
++    buf = io.StringIO()
++    suite = unittest.defaultTestLoader.loadTestsFromName(名)
++    结果 = unittest.TextTestRunner(stream=buf, verbosity=0).run(suite)
++    return 结果.wasSuccessful(), buf.getvalue()
++
++
++def 红绿(说明, 打补丁, 撤补丁, 测试名):
++    打补丁()
++    try:
++        通过, 输出 = 跑单测(测试名)
++    finally:
++        撤补丁()
++    if 通过:
++        记("红失败", f"{说明}：打了补丁居然还通过")
++    else:
++        记("红", f"{说明}：" + next((l.strip() for l in 输出.splitlines() if "FAIL" in l or "Error" in l), "失败"))
++    通过2, _ = 跑单测(测试名)
++    记("绿" if 通过2 else "绿失败", f"{说明}：恢复后 {'通过' if 通过2 else '仍失败'}")
++
++
++# ---- 1) 钥匙显隐 ----
++原_显隐 = SW.SettingsWindowMixin._toggle_key_show
++红绿(
++    "钥匙显隐",
++    lambda: setattr(SW.SettingsWindowMixin, "_toggle_key_show", lambda self: None),
++    lambda: setattr(SW.SettingsWindowMixin, "_toggle_key_show", 原_显隐),
++    "tests.test_p2.钥匙显隐",
++)
++
++# ---- 2) 测试连接 ----
++原_测试 = SW.SettingsWindowMixin._settings_test
++红绿(
++    "测试连接",
++    lambda: setattr(SW.SettingsWindowMixin, "_settings_test", lambda self: None),
++    lambda: setattr(SW.SettingsWindowMixin, "_settings_test", 原_测试),
++    "tests.test_p2.测试连接",
++)
++
++# ---- 3) 对比度 ----
++原_浅 = T.FAINT_FG
++def _降对比():
++    T.FAINT_FG = "#E8E8E8"
++def _恢复对比():
++    T.FAINT_FG = 原_浅
++红绿("调色板对比度", _降对比, _恢复对比, "tests.test_p2.调色板对比度")
++
++# ---- 4) 空状态 / 滚动条 ----
++a = A.App()
++a.popup()
++a.root.update()
++time.sleep(0.2)
++a.root.update()
++
++原_提示 = A.App._sync_empty_hint
++a.empty_hint.place_forget()
++a.root.update()
++A.App._sync_empty_hint = lambda self: None
++try:
++    a._sync_empty_hint()
++    a.root.update()
++    记("红", f"空状态：关掉实现后引导可见={bool(a.empty_hint.winfo_ismapped())}（应 False）")
++finally:
++    A.App._sync_empty_hint = 原_提示
++a._sync_empty_hint()
++a.root.update()
++记("绿", f"空状态：恢复后引导可见={bool(a.empty_hint.winfo_ismapped())}（应 True）")
++
++原_滚动 = A.App._on_dst_scroll
++a.dst_bar.grid_remove()
++a.root.update()
++A.App._on_dst_scroll = lambda self, 首, 末: None
++a.dst_text.configure(yscrollcommand=a._on_dst_scroll)  # 绑到补丁后的方法
++try:
++    a._dst_set("长译文。" * 200)
++    a.root.update()
++    time.sleep(0.3)
++    a.root.update()
++    记("红", f"滚动条：关掉实现后可见={bool(a.dst_bar.winfo_ismapped())}（应 False）")
++finally:
++    A.App._on_dst_scroll = 原_滚动
++    a.dst_text.configure(yscrollcommand=a._on_dst_scroll)
++    a._on_dst_scroll(*[str(v) for v in a.dst_text.yview()])
++a.root.update()
++time.sleep(0.4)
++a.root.update()
++记("绿", f"滚动条：恢复后可见={bool(a.dst_bar.winfo_ismapped())}（应 True）")
++
++# ---- 5) 拖宽：复刻"热区在透明边→点击穿透"的旧 bug，再用真鼠标证明 ----
++u = ctypes.windll.user32
++
++
++def 真实拖(x, y, dx):
++    u.SetCursorPos(int(x), int(y))
++    time.sleep(0.15)
++    a.root.update()
++    u.mouse_event(0x0002, 0, 0, 0, 0)
++    time.sleep(0.12)
++    a.root.update()
++    for i in range(1, 7):
++        u.SetCursorPos(int(x + dx * i / 6), int(y))
++        time.sleep(0.04)
++        a.root.update()
++    u.mouse_event(0x0004, 0, 0, 0, 0)
++    time.sleep(0.15)
++    a.root.update()
++
++
++def 摆热区(透明边):
++    for 边, z in a._width_zones:
++        if 透明边:
++            z.configure(bg=T.KEY_COLOR)
++            if 边 == "left":
++                z.place(x=0, y=MARGIN + 13, width=MARGIN, height=max(40, a._window_h - 2 * MARGIN - 26))
++            else:
++                z.place(x=a._window_w - MARGIN, y=MARGIN + 13, width=MARGIN,
++                        height=max(40, a._window_h - 2 * MARGIN - 26))
++        else:
++            z.configure(bg=T.CARD_BG)
++    if not 透明边:
++        a._place_resize()
++
++
++摆热区(True)
++a.root.update()
++起 = a.root.winfo_width()
++真实拖(a.root.winfo_rootx() + a._window_w - MARGIN // 2,
++       a.root.winfo_rooty() + a._window_h // 2, 80)
++记("红", f"拖宽（热区在透明边）：{起}->{a.root.winfo_width()}（应不变，证明点击穿透）")
++
++摆热区(False)
++a.root.update()
++起2 = a.root.winfo_width()
++真实拖(a.root.winfo_rootx() + a.root.winfo_width() - MARGIN - 6,
++       a.root.winfo_rooty() + a.root.winfo_height() // 2, 60)
++记("绿", f"拖宽（热区在卡片内）：{起2}->{a.root.winfo_width()}（应变宽）")
++
++a.on_quit()
++
++日志 = "\n".join(行) + "\n"
++io.open(os.path.join(BASE, "evidence", "p2-redgreen.log"), "w", encoding="utf-8", newline="").write(日志)
++坏 = sum(1 for l in 行 if "红失败" in l or "绿失败" in l)
++print("红绿记录完成，异常", 坏)
++sys.exit(0 if 坏 == 0 else 1)
+diff --git a/evidence/review.json b/evidence/review.json
+index 76d422b..323953e 100644
+--- a/evidence/review.json
++++ b/evidence/review.json
+@@ -1,46 +1,51 @@
+ {
+   "verdict": "通过",
+-  "task_verdict": "有条件通过",
+-  "round": 2,
+-  "previous_verdict": "打回",
+-  "reviewer": "验收小工",
+   "checked": [
+-    "状态条（blocker）：真实 App（stub `_start_trigger/_start_tray/_start_singleton_server`，同 `evidence/grab_ui.py`）调用 `_say_transient('译文已复制，去粘贴试试')` 后 `footer.winfo_height()==32`、`translate_btn.winfo_height()==32`、`header.winfo_height()==28`、`status_label.master is header`；`_status_hide()` 后仍 32/32；带文本时 card 596→596、root 612→612，无文本时 card 446→446，状态条不再改变卡片高度。",
+-    "顶栏裁切：同一真实 App 测得 `header.winfo_height()==28`、`copy_btn.winfo_reqheight()==copy_btn.winfo_height()==28`、`close_btn` 同为 28；`app.py:212-263` 的 header height=ICON_BTN、按钮 height=ICON_BTN 与实测一致，无 2px 裁切。",
+-    "FIXED_CHROME：`translator_layout.FIXED_CHROME==203`；实测 `root.winfo_reqheight() 462 - dst_text.winfo_reqheight() 174 - src_text.winfo_reqheight() 85 == 203`；`app.py` pack 参数逐项对上（card padx/pady 8/8、header pady(12,0)/h28、dst pady(8,0)、divider pady(22,0)/h9、src_head pady(14,0)/h28、src_text pady(6,0)、footer pady(10,18)/h32）；`HEADER_H==LABEL_H==ICON_BTN==28`；`tests/test_layout.py` 的 `test_顶栏与原文行高度等于图标按钮尺寸` 与 `test_固定铬等于203` 直接断言这些关系，不再只对常量做同义相加。",
+-    "翻译按钮：`translate_btn.winfo_reqheight()==32`；`app.py:374-392` 使用 96x32 图片、width=96/height=32、bd=0/padx=0/pady=0；`footer.winfo_height()==32`，按钮与底栏等高。",
+-    "死代码/导入：AST+grep 复查 `app.py` 中 `_按钮|ttk|TITLE_FONT|ACCENT_PRESS|RADIUS|EDGE|GAP|ICON_FG` 均 0 命中；app.py 从 `translator_theme` 导入的 26 个符号全部有使用；`python -c \"import app\"` 输出 `IMPORT OK`；`python -m py_compile app.py translator_theme.py translator_layout.py translator_settings_window.py` 退出 0。全仓复查 translator_theme.py 仍有未引用的 RADIUS/GAP/TITLE_FONT（见 findings，属清理项）。",
+-    "证据文件：`python evidence/check_layout.py` 单独运行 5/5 次退出 0、末行 `ALL PASS`（状态显示/隐藏时 footer 与按钮均 32、四角 13x13、462/612 两个高度对齐、窗口内 magenta=0）；`python -m unittest discover -s tests -v` 新鲜运行 `Ran 58 tests ... OK`；`git diff --numstat -- tests` 为 `43 0`（无删除）；`evidence/test-a1.log` 13:04:55 显示 58 tests OK，晚于 `tests/test_layout.py` 13:03:22；`evidence/summary.md` 标题/正文为本轮“状态条压扁底栏等 6 缺陷修复”；`evidence/meta.json` level=L3、review_required=true。",
+-    "回归：`C:\\Users\\Administrator\\AppData\\Local\\Temp\\opencode\\smoke_borderless.py` 两次运行均 `drag_ok=True`、`close_ok=True`、`esc_ok=True`；真实 `_toggle_source` 展开/收起路径 491→635→624 三个高度，四角遮罩均为 13x13 且 bl/br 的 y==h-21。",
+-    "视觉值：`evidence/mockup-a1.png`/`mockup-a2.png` 与当前渲染对照，主蓝≈#2563EB、圆角 12/8、PAD_X=18、主按钮 96x32、角遮罩 13x13 均未变；未评审审美方向。"
++    "第1条 测试连接：`translator_settings_window.py` 仍复用 `translator_provider.chat`，后台线程 + `after` 回主线程，缺字段早退，测试中按钮 disabled。用最终代码重跑真实 mainloop 探针：成功显示“连接正常：模型回复「正常」”、失败显示“连接失败：钥匙无效（401）”、按钮恢复 normal；缺字段 0 次请求；未完成时销毁配置窗不崩。通过。",
++    "第2条 钥匙显隐：最终代码下真实配置窗点两次，Entry `show` 为 `*`→``→`*`，按钮文字“显示”→“隐藏”→“显示”。通过。",
++    "第3条 空状态引导：最终代码下空窗 `empty_hint` 可见；写入“翻译中，请稍等…”后自动收起且不进入 `dst_text`；点击引导焦点到原文框，无异常。通过。",
++    "第4条 滚动条：`_bar_jump` 已改用 `event.y_root - dst_bar.winfo_rooty()`。真实鼠标复验：滚到中间（yview 0.50）后抓滑块，按下不再跳顶（0.50→0.512），向下拖 96px 到 0.967；轨道点击 0.21→0.79；长内容出现、短内容收起。通过。",
++    "第5条 英文字体：原文框与词典“例英”仍使用 `EN_FONT=('Segoe UI',10)`，释义/词性/“例中”用微软雅黑。通过。",
++    "第6条 窗口宽度：热区已从透明边移进卡片内部 6px、用 `CARD_BG`；真实鼠标实测左右热区光标均为 size_we（中心为普通箭头），右拖 475→505 且右缘=1920 不越屏，左拖 505→567 且右缘 1920→1920 不动；极端拖拽宽度 950（px760）夹在屏内；最小宽 400、底栏底 497≤530；窄化长译文后高度重新贴合到 777 且未越屏。通过。",
++    "第7条 深色模式：最终代码 `TRANSLATOR_THEME=dark` 现场复拍配置窗标题栏平均亮度 43.6（d4 截图同为 43.6），主窗色键在开窗后恢复为 #FF00FE；主窗/列表/图标/四角/气泡跟随主题。`ACCENT_TEXT` 深色 #9DBBFF on #1E2227=8.36:1，`ERROR_FG` #FF9A8A on #1E2227=7.80:1；d3 词典“词性”已变浅蓝。`test_p2` 已加 `ACCENT_TEXT >= 4.5` 断言，浅色/深色两轮均过。通过。",
++    "修复项 红→绿：把 `evidence/p2-redgreen.py` 复制到临时目录执行（避免改写项目证据），六组全部复现：钥匙显隐/测试连接/对比度/空状态/滚动条均为“关掉实现→红、恢复→绿”；拖宽旧 bug 热区在透明边 475→475，热区移进卡片后 475→505。通过。",
++    "修复项 真实鼠标：`python evidence/e2e-mouse.py` 我自己连跑 3 次，均 ALL PASS（拖右 475→505、右缘 1920；拖左 505→567、右缘 1920→1920；滑块 0.00→0.21；轨道 0.21→0.79）。通过。",
++    "P0/P1 回归：`python -m unittest discover -s tests -v` → Ran 88 tests OK；`check_layout.py`、`check-round2.py`、`check-p2.py` 均 ALL PASS；DPI/只读/删除确认/关窗提醒/列表配色/四角未见回归。通过。"
+   ],
+   "missing": [],
++  "blocking": [],
+   "findings": [
+     {
+-      "file": "translator_theme.py",
+-      "issue": "全仓复查仍有未引用的定义：RADIUS（第 38 行，仅赋值）、GAP（第 41 行，仅赋值）、TITLE_FONT（第 23 行，仅赋值；HEAD 已有）。app.py 侧已全部清理，但第 5 条若按“全仓无未使用定义”严格解读，本轮只完成了 app.py 部分；不影响 import/运行。",
+-      "evidence": "AST/grep：translator_theme.py:23/38/41 各 1 次；app.py 0 命中；`python -c \"import app\"` 成功。"
++      "file": "evidence/summary.md:106",
++      "issue": "仍写“exe 重打 37,701,892 字节”，实际最终 exe 为 37,703,328 字节（build-p2.log/stat 12:04:39；协调者口径也是 37,703,328）。属陈旧数字，不影响功能与冒烟结论。",
++      "evidence": "stat dist/翻译小助手.exe = 37,703,328；evidence/build-p2.log 12:04:39 Build complete。"
++    },
++    {
++      "file": "evidence/summary.md / evidence/run-p2.json",
++      "issue": "截图口径对不上：summary 写“浅色 5 张 + 深色 4 张”，实际 `evidence/audit/` 有 8 张（01-08）；`run-p2.json` 只列 `audit-shots.py # 浅色截图 5 张`，漏列生成 06-08 的 `shot-p2.py`。属文档计数问题。",
++      "evidence": "ls evidence/audit 有 01-08 共 8 张；shot-p2.py 生成 06/07/08；run-p2.json commands 无 shot-p2.py。"
+     },
+     {
+-      "file": "evidence/run-a1.json",
+-      "issue": "仍是上一轮 12:15 的旧证据：tests.count=56、fixed_chrome=189，与本轮 58 tests / FIXED_CHROME=203 矛盾；summary.md 未引用它，但留在 evidence 里会误导后续复核。",
+-      "evidence": "evidence/run-a1.json mtime 2026-10-30 12:15:43；当前 evidence/test-a1.log 13:04:55 显示 Ran 58 tests OK；translator_layout.FIXED_CHROME=203。"
++      "file": "translator_settings_window.py:78-99",
++      "issue": "深色开窗时先摘主窗色键、`win.update()` 后再应用 DWM，存在极短瞬态：探针在 `_apply_dark_titlebar` 入口采到主窗透明边为 (255,0,254) 品红、配置窗标题栏为 (229,229,229) 浅色；恢复后主窗边正常、标题栏 43 深色。最终状态正确，但打开配置窗可能有一帧闪。",
++      "evidence": "临时探针 probe_open_flash.py：during open margin=(255,0,254), title=(229,229,229)；after margin restored, title dark。"
+     },
+     {
+-      "file": "evidence/check_layout.py",
+-      "issue": "单独运行稳定（5/5 ALL PASS），但与另一个会 focus_force 的 Tk App（smoke_borderless.py）同时运行时 3/3 退化为 FAILED 2：窗口被 FocusOut 隐藏后第二次 _place_top_right 的 geometry 未在 root.update() 内生效，check_corners 用 root.winfo_height() 算期望、_place_corners 用 _window_h 放置，隐藏态二者错位。属检查脚本的时序/焦点鲁棒性问题；独立探针在真实 462/491/612/635 高度均对齐，不是产品布局回归。",
+-      "evidence": "单独 `python evidence/check_layout.py` 5 次均 exit 0/ALL PASS；与 smoke 并行 3 次均 `FAILED 2`（角遮罩@462/bl y=591 vs 期望 441）。"
++      "file": "evidence/e2e-mouse.py",
++      "issue": "E2E 的滑块用例是从 yview 0.00 顶部开始拖的；上轮的关键 bug 是“滚到中间再抓滑块会跳顶”。我另写探针验证中间抓取已修（0.50→0.512→0.967），建议把该场景补进 E2E 固化。",
++      "evidence": "临时探针 probe_thumb_mid.py：mid_press=0.512 after=0.967 PASS=True。"
++    },
++    {
++      "file": "translator_theme.py:58 / translator_settings_window.py:385",
++      "issue": "使用 uxtheme 未文档化序号 135/133（SetPreferredAppMode/AllowDarkModeForWindow），未来 Windows 版本可能失效；当前失败会被 try 捕获，本机实测有效。",
++      "evidence": "代码行；本机 18363 最终标题栏变深、主窗色键恢复。"
+     }
+   ],
+-  "blocking": [],
+   "notes": [
+-    "上一轮（round 1）裁决为 打回；本轮按任务卡只复验 6 项修复 + 回归/视觉值。",
+-    "状态条最终位置：status_label 的 master 是 self.header；header 设了 pack_propagate(False) 且 height=ICON_BTN，状态标签显示/隐藏只改 header 内部布局，不参与卡片高度计算。",
+-    "四角遮罩独立探针：462/491/612/635 高度下均 13x13，bl/br y 恒为 h-8-13；两高度对齐要求满足。",
+-    "拖拽/✕/Esc：smoke 断言三项均 True；Esc 仍需窗口有键盘焦点，属任务卡明确允许的既有行为，未按回归判。",
+-    "红绿说明：红证据是上一轮 review.json 里真实 App 复现的 footer=2；绿证据是本轮 check_layout/独立探针的 footer=32。本轮没有新增一份独立的失败日志；若严格按 TDD 留档，建议下次先存失败快照再修。",
+-    "本轮未改任何源码、测试或截图；仅写入本 review.json。所有复现脚本/临时输出在 %TEMP%\\opencode 下，未进项目。",
+-    "系统四档映射：verdict=通过；任务卡三档映射：task_verdict=有条件通过。条件仅为上面 findings 的清理/稳定化项，不阻断本次功能验收。"
++    "上一轮 6 条 blocking 均已闭合：拖宽热区、拖宽锚点/夹屏、滑块坐标、深色标题栏、深色强调色、P2 红→绿。",
++    "本轮我独立重跑：88 tests OK、check_layout/check-round2/check-p2 ALL PASS、e2e-mouse 3 次 ALL PASS、p2-redgreen 六组复现、深色标题栏与 ACCENT_TEXT 对比度实采。",
++    "深色模式仍是启动时读取，运行中切系统主题需重开；宽度只记本次运行，不写配置，符合本轮说明。",
++    "浅色/深色截图均晚于最终代码保存（浅色 12:03 vs app.py 11:43/theme 11:57；深色 11:57:06 vs theme/settings 11:57:05），时间顺序正常。"
+   ],
+-  "reviewed_at": "2026-10-30T13:14:47"
++  "reviewed_at": "2026-11-02T12:13:13"
+ }
+diff --git a/evidence/run-p2.json b/evidence/run-p2.json
+new file mode 100644
+index 0000000..8393fec
+--- /dev/null
++++ b/evidence/run-p2.json
+@@ -0,0 +1,39 @@
++{
++  "task": "UI 审核 P2 七条：测试连接、钥匙显隐、空状态引导、滚动条提示、英文字体、窗口宽度、深色模式",
++  "level": "L3",
++  "level_reason": "跨模块：改 theme（调色板/字体/图标底色）、app（滚动条/空状态/宽度拖拽）、settings_window（测试连接/钥匙显隐），新增深色主题分支；无对外接口与数据变更",
++  "changed": [
++    "translator_theme.py：深色/浅色调色板（系统主题跟随，TRANSLATOR_THEME 可覆盖）、EN_FONT=Segoe UI、TIP_BG/TIP_FG、SELECT_*、SECONDARY_*、DIV_HOVER、EXAMPLE_FG；图标/四角/气泡底色改为跟随 CARD_BG/TIP_BG",
++    "app.py：译文区外层容器 + 自绘细滚动条（溢出才显示）、空状态引导、左右边拖拽调宽（320–760 逻辑，会话内）、例句用英文字体、分隔线悬停色走主题",
++    "translator_settings_window.py：测试连接按钮（复用 provider.chat）、钥匙显示/隐藏、深色标题栏（DwmSetWindowAttribute）、列表选中色走主题",
++    "tests/test_p2.py（新增 6 条）、tests/test_drag_fit.py（+1 条拖宽）、tests/test_settings_list.py（颜色常量跟随主题）",
++    "README.md / AGENTS.md：功能与模块表同步",
++    "独立复核打回后的修复：拖宽热区移进卡片内部（避开色键穿透）、拖宽保持被拖边锚定并夹屏、滑块用屏幕坐标、深色标题栏（ForceDark + 建窗时短暂摘色键 + DWM 属性）、深色文字强调色 ACCENT_TEXT",
++    "evidence/shot-p2.py（新增：空状态/滚动条/配置窗截图，生成 audit 06–08）"
++  ],
++  "commands": [
++    "python -m unittest discover -s tests        # 88 tests OK",
++    "python evidence/check_layout.py            # ALL PASS",
++    "python evidence/check-round2.py            # ALL PASS",
++    "python evidence/check-p2.py                # ALL PASS（空状态/滚动条/拖宽/浅色+深色调色板）",
++    "python evidence/audit-shots.py             # 浅色截图 5 张",
++    "TRANSLATOR_THEME=dark python evidence/shot-dark.py  # 深色截图 4 张",
++    "python -m PyInstaller --noconfirm --clean 翻译小助手.spec  # Build complete",
++    "dist/翻译小助手.exe 冒烟 + SHOW → 475x530",
++    "python evidence/e2e-mouse.py                 # ALL PASS（真实鼠标）",
++    "python evidence/p2-redgreen.py               # 红→绿 6 组全部符合预期"
++  ],
++  "exit_codes": [
++    0,
++    0,
++    0,
++    0,
++    0,
++    0,
++    0,
++    0,
++    0,
++    0
++  ],
++  "notes": "深色模式跟随系统启动时读取（注册表 AppsUseLightTheme），不做运行时热切换；宽度只记本次运行，不写配置。测试连接的失败文案取自 Failure.message。"
++}
+\ No newline at end of file
+diff --git a/evidence/run-ui2.json b/evidence/run-ui2.json
+new file mode 100644
+index 0000000..71c196a
+--- /dev/null
++++ b/evidence/run-ui2.json
+@@ -0,0 +1,43 @@
++{
++  "task": "UI 审核整改第一轮：P0 五条 + P1 七条",
++  "level": "L3",
++  "level_reason": "跨模块：新增 translator_scale.py，改 translator_theme/layout/settings_window/app 四个模块的像素常量与交互，涉及窗口尺寸、DPI 感知、配置窗行为；无对外接口与数据变更，但影响面覆盖全部界面",
++  "changed": [
++    "translator_scale.py(新增：DPI 感知 + px() 换算 + tk_scaling)",
++    "translator_theme.py(常量过 px()；FAINT_FG 3.07→4.6、ICON_FG 2.58→4.31；齿轮改 ICON_FG；图标几何随缩放；气泡 1.5s→8s 兜底；新增 _make_app_icon)",
++    "translator_layout.py(所有垂直节奏与 900 上限过 px())",
++    "app.py(Tk scaling 对齐 DPI；全部内边距/按钮尺寸过 px()；译文区只读；图标间距；窗口图标；音标分行)",
++    "translator_settings_window.py(尺寸 620x480 逻辑、锁定大小、间距收紧、删除二次确认、未保存关窗提醒、列表选中样式、标题栏图标)",
++    "tests/test_layout.py / test_resize.py / test_window_pos.py / test_drag_fit.py / test_settings_guard.py（新增 8 条）",
++    "evidence/check_layout.py（断言改用缩放常量）",
++    "tests/test_settings_list.py（新增 2 条：真实颜色断言，含红→绿记录）"
++  ],
++  "commands": [
++    "python -m unittest discover -s tests            # 81 tests OK",
++    "python evidence/check_layout.py                # ALL PASS",
++    "python evidence/check-round2.py                # ALL PASS",
++    "python evidence/audit-shots.py                 # 125% 原生截图 5 张",
++    "python -m PyInstaller --noconfirm --clean 翻译小助手.spec  # Build complete",
++    "dist/翻译小助手.exe 启动冒烟 + SHOW 窗口 475x530 # EXE_ALIVE"
++  ],
++  "exit_codes": [
++    0,
++    0,
++    0,
++    0,
++    0,
++    0
++  ],
++  "dpi_finding": "真机 125%（GetDpiForSystem=120）；改前程序未声明 DPI 感知，窗口 380px 被系统拉伸到 475px 显示，整窗发虚",
++  "contrast": {
++    "FAINT_FG": "3.07 -> 4.60",
++    "ICON_FG": "2.58 -> 4.31",
++    "标准": "正文 4.5:1 / 图标 3:1"
++  },
++  "notes": "改前 5 张对照截图仍在 evidence/ui-*.png、settings-after.png；改后截图在 evidence/audit/；主窗高度 530 是 spacing/pady 补 px() 后的正常值，非回归",
++  "review_rounds": [
++    "round 1：打回（删除/关窗 fail-open；列表蓝色被覆盖）",
++    "round 2：打回（Listbox 不支持逐项 font，加粗未生效）",
++    "round 3：证据不足（功能通过；补列表红绿记录、计数笔误、测试 DPI 顺序、选中蓝字对比度）→ 本轮已全部补齐"
++  ]
++}
+\ No newline at end of file
+diff --git a/evidence/shot-dark.py b/evidence/shot-dark.py
+new file mode 100644
+index 0000000..686af59
+--- /dev/null
++++ b/evidence/shot-dark.py
+@@ -0,0 +1,40 @@
++"""深色模式截图（TRANSLATOR_THEME=dark 运行）。"""
++import ctypes, os, sys, time
++BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++sys.path.insert(0, BASE); os.chdir(BASE)
++try: ctypes.windll.shcore.SetProcessDpiAwareness(1)
++except Exception: pass
++import app as appmod
++from PIL import ImageGrab
++from translator_domain import Definition
++appmod.App._start_trigger = lambda s: None
++appmod.App._start_tray = lambda s: None
++appmod.App._start_singleton_server = lambda s: None
++OUT = os.path.join(BASE, "evidence", "audit-dark"); os.makedirs(OUT, exist_ok=True)
++
++def grab(widget, name):
++    hwnd = ctypes.windll.user32.GetAncestor(widget.winfo_id(), 2)
++    r = (ctypes.c_long * 4)(); ctypes.windll.user32.GetWindowRect(hwnd, r)
++    im = ImageGrab.grab(bbox=(r[0], r[1], r[2], r[3]))
++    im.save(os.path.join(OUT, name)); print("saved", name, im.size)
++
++a = appmod.App(); a.popup(); a.root.update(); time.sleep(0.2)
++grab(a.root, "d1-empty.png")
++a.src_text.delete("1.0","end"); a.src_text.insert("1.0","One concern: the actual app needs a visual check.")
++a._dst_set("有个担心：实际界面必须肉眼检查一次，因为几何检查判断不了美丑。设计故意极简，应该看起来安静透气。")
++a.root.update(); time.sleep(0.2); grab(a.root, "d2-translate.png")
++a._show_dict(Definition(word="resilience", uk="/rɪˈzɪliəns/", us="/rɪˈzɪliəns/",
++    senses=[{"pos":"n.","defs":["恢复力，韧性"],"examples":[{"en":"She showed great resilience.","zh":"她表现出极强的韧性。"}]}]))
++a.root.update(); time.sleep(0.3); grab(a.root, "d3-dict.png")
++a.open_settings(); a.root.update(); w=a.settings_win; w.update(); time.sleep(0.3)
++grab(w, "d4-settings.png")
++try:
++    from PIL import Image as _I
++    im = _I.open(os.path.join(OUT, "d4-settings.png")).convert("RGB")
++    y = 8
++    xs = list(range(300, 500, 10))
++    vals = [sum(im.getpixel((x, y))) / 3 for x in xs]
++    print("标题栏平均亮度:", round(sum(vals) / len(vals), 1))
++except Exception as e:
++    print("标题栏采样失败", e)
++a.on_quit()
+diff --git a/evidence/shot-p2.py b/evidence/shot-p2.py
+new file mode 100644
+index 0000000..7740e65
+--- /dev/null
++++ b/evidence/shot-p2.py
+@@ -0,0 +1,37 @@
++"""P2 截图：空状态 / 长译文滚动条 / 钥匙显隐 / 测试连接按钮。"""
++import ctypes, os, sys, time
++BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++sys.path.insert(0, BASE); os.chdir(BASE)
++try: ctypes.windll.shcore.SetProcessDpiAwareness(1)
++except Exception: pass
++import app as appmod
++from PIL import ImageGrab
++appmod.App._start_trigger = lambda s: None
++appmod.App._start_tray = lambda s: None
++appmod.App._start_singleton_server = lambda s: None
++OUT = os.path.join(BASE, "evidence", "audit")
++os.makedirs(OUT, exist_ok=True)
++
++def grab(root, name):
++    hwnd = ctypes.windll.user32.GetAncestor(root.winfo_id(), 2)
++    r = (ctypes.c_long * 4)(); ctypes.windll.user32.GetWindowRect(hwnd, r)
++    im = ImageGrab.grab(bbox=(r[0], r[1], r[2], r[3]))
++    im.save(os.path.join(OUT, name)); print("saved", name, im.size)
++
++a = appmod.App(); a.root.deiconify(); a._place_top_right(); a.root.update()
++a.popup(); a.root.update(); time.sleep(0.2)
++grab(a.root, "06-empty.png")
++print("空状态可见:", bool(a.empty_hint.winfo_ismapped()))
++
++a.src_text.delete("1.0", "end"); a.src_text.insert("1.0", "Long text")
++a._dst_set("这是一段很长的译文。" * 40)
++a.root.update(); time.sleep(0.4); a.root.update()
++grab(a.root, "07-scroll.png")
++print("滚动条可见:", bool(a.dst_bar.winfo_ismapped()), "yview=", a.dst_text.yview())
++
++a.open_settings(); a.root.update(); w = a.settings_win; w.update(); time.sleep(0.3)
++hwnd = ctypes.windll.user32.GetAncestor(w.winfo_id(), 2)
++r = (ctypes.c_long * 4)(); ctypes.windll.user32.GetWindowRect(hwnd, r)
++ImageGrab.grab(bbox=(r[0], r[1], r[2], r[3])).save(os.path.join(OUT, "08-settings-p2.png"))
++print("saved 08-settings-p2.png")
++a.on_quit()
+diff --git a/evidence/summary.md b/evidence/summary.md
+index e26d892..e553a3e 100644
+--- a/evidence/summary.md
++++ b/evidence/summary.md
+@@ -70,3 +70,60 @@
+ - `evidence/repro-footer.py`：拖拽压按钮复现脚本（修后 RED=False）
+ - `evidence/shot-drag.py` / `evidence/drag-after.png`：拖到最矮后的截图
+ - `tests/test_drag_fit.py`：2 条新回归（拖到底按钮不越界、拖矮再拖高原文框恢复）
++# 收工证据 · UI 审核整改第一轮（2026-11-02）
++
++1. 做了什么：按设计审核的 P0+P1 改完——真机 125% 下声明 DPI 感知并按比例放大全部间距/图标/窗口（原来整窗被系统拉伸发虚）；浅灰字与图标加深到看得清；译文区改只读；词典英音美音各占一行；配置窗锁定 620×480 逻辑尺寸、标题栏换成蓝底"译"、删除先确认、关窗提醒未保存、列表用"✓ + 蓝字"标正在用且不再套蓝框；图标间距拉开；悬停提示不再 1.5 秒自己消失。独立复核打回两轮，已修：对话框异常时删除/关窗不再 fail-open；列表配色改用 selectforeground 动态设置（Tk Listbox 不支持逐项字体）。
++2. 验了什么：81 条单测全过（新增 10 条：只读、删除确认、关窗提醒、异常路径、列表真实颜色）；红/绿记录见 `test-guard-redgreen.log` 与 `test-settings-list-redgreen.log`；界面回归 ALL PASS（125% 下底栏 40px、四角对齐、无品红）；运行时验收 ALL PASS（缩放 1.25、只读、配置窗 775×606 客户区、删除取消不删、取消关窗窗口还在）；5 张 125% 原生截图；exe 重打后 SHOW 出窗 475×530 与源码版一致。
++3. 还剩什么：审核里的 P2 七条未做（测试连接、钥匙显隐、空状态引导、滚动条提示、英文字体、窗口宽度、深色模式）。
++
++## 验收单（UI 审核整改）
++
++- [ ] 打开弹窗看字和图标：比之前清楚不发虚；窗口整体比原来大一点点（125% 缩放下的正常大小）
++- [ ] 右上角三个图标颜色更深、看得清；复制和叉之间拉开了距离，不容易点错
++- [ ] 在译文区点一下直接打字 → 打不进去；选中一段仍然能复制
++- [ ] 查一个单词 → "英 /…/" 和 "美 /…/" 各占一行，不会把"美"和音标拆成两行
++- [ ] 配置窗左上角图标变成蓝底"译"；列表里带 ✓ 且是蓝色字的那套是正在用的；点删除会先问一句
++- [ ] 配置窗里改了地址或钥匙，直接点右上角 × → 会问"还有改动没保存"
++- [ ] 鼠标停在图钉或齿轮上出小提示，鼠标不动它不会自己消失；移开才收
++
++## 证据在哪（本轮）
++
++- `evidence/audit/`：125% 原生截图（翻译、状态提示、词典、气泡、配置窗）
++- `evidence/ui-main.png` 等：改前对照图
++- `evidence/check-round2.py` / `evidence/test-ui2.log`：运行时验收与单测记录
++- `evidence/test-guard-redgreen.log`：对话框异常的红→绿记录
++- `evidence/test-settings-list-redgreen.log`：列表配色的红→绿记录
++- `evidence/build-ui2.log`：打包原始日志
++- `evidence/diff-ui2.patch`：本轮完整改动（含新增文件）
++- `evidence/run-ui2.json`：命令、退出码、根因与改动清单
++- `evidence/review.json`：独立复核裁决
++
++结构变化：新增 3（`translator_scale.py`、`tests/test_settings_guard.py`、`tests/test_settings_list.py`），AGENTS.md 状态：已更新
++
++# 收工证据 · UI 审核 P2 七条（2026-11-02）
++
++1. 做了什么：测试连接（复用 provider 真发一条最小请求，失败给具体原因）；钥匙"显示/隐藏"；空状态引导（没内容时中间浮一句，有字自动收）；译文超长才出现的细自绘滚动条；英文原文/例句改 Segoe UI；左右边拖拽调宽（320–760 逻辑，底栏始终在）；深色模式（跟随系统，配置窗标题栏也变深，提示条/图标/四角/列表配色全部有深色值）。
++2. 验了什么：88 条单测全过（新增 6 条 P2 行为 + 1 条拖宽回归）；`check-p2.py` ALL PASS（空状态、滚动条出现/收起、拖宽下限与底栏、浅色/深色调色板）；真实鼠标 E2E 全过（拖宽/夹屏/拖左不动右缘/滑块/轨道点击）；P2 红→绿记录见 `p2-redgreen.log`；深色对比度实测 FAINT 6.18、ICON 7.53、选中蓝字 6.90、提示条 10.16；浅色 8 张 + 深色 4 张截图；exe 重打 37,703,328 字节，冒烟通过，SHOW 出窗 475×530。
++3. 还剩什么：深色是启动时读取、运行中切系统主题需重开；窗口宽度只记本次运行不落配置；P2 全部完成，下一步只剩用户验收。
++
++## 验收单（P2 七条）
++
++- [ ] 打开窗口还没内容时，中间有一句引导；复制英文点 Ctrl 拿到译文后它自动消失
++- [ ] 翻一段很长的译文 → 右侧出现一条细灰滚动条，能拖着看全文；内容短了它自己收起
++- [ ] 配置窗"钥匙"右边有「显示」：点一下能看到钥匙原文，再点变回星号
++- [ ] 配置窗底部有「测试连接」：三样填好点它 → 显示"连接正常"或具体失败原因
++- [ ] 鼠标放到窗口左/右边缘（光标变左右箭头）能拖宽拖窄；拖到最窄会停住，翻译按钮不会消失
++- [ ] 英文原文和例句换成系统英文字体（Segoe UI），中英混排更顺眼
++- [ ] 把 Windows 切到深色模式再打开程序 → 弹窗、配置窗、标题栏都是深色；切回浅色也一样
++
++## 证据在哪（P2）
++
++- `evidence/audit/`：浅色截图（含空状态 06、滚动条 07、配置窗 08）
++- `evidence/audit-dark/`：深色截图 4 张
++- `evidence/check-p2.py` / `evidence/test-p2.log`：P2 验收与单测记录
++- `evidence/e2e-mouse.py`：真实鼠标端到端验证
++- `evidence/p2-redgreen.py` / `evidence/p2-redgreen.log`：P2 红→绿记录
++- `evidence/build-p2.log`：打包原始日志
++- `evidence/run-p2.json`：命令、退出码、改动清单
++
++结构变化：新增 1（`tests/test_p2.py`），AGENTS.md 状态：已更新
+diff --git a/evidence/test-guard-redgreen.log b/evidence/test-guard-redgreen.log
+new file mode 100644
+index 0000000..6eb84e7
+--- /dev/null
++++ b/evidence/test-guard-redgreen.log
+@@ -0,0 +1,11 @@
++=== 红：对话框异常时旧代码会 fail-open（删除/关窗仍然执行）===
++FAIL: test_ѯ�ʿ����ʱ���� (tests.test_settings_guard.�ش��쳣·��.test_ѯ�ʿ����ʱ����)
++AssertionError: True is not false : ���ѿ����ȴ�Ѵ��ڹ���
++FAIL: test_ѯ�ʿ����ʱ��ɾ (tests.test_settings_guard.�ش�����.test_ѯ�ʿ����ʱ��ɾ)
++AssertionError: Lists differ: ['����'] != []
++Ran 7 tests in 0.007s
++FAILED (failures=2)
++
++=== 绿：修复后（异常一律按“取消”处理）===
++Ran 7 tests in 0.000s
++OK
+diff --git a/evidence/test-p2.log b/evidence/test-p2.log
+new file mode 100644
+index 0000000..5be02df
+--- /dev/null
++++ b/evidence/test-p2.log
+@@ -0,0 +1,44 @@
++=== 全量单测 ===
++python -m unittest discover -s tests
++Ran 88 tests
++OK
++
++=== P2 验收脚本 ===
++python evidence/check-p2.py
++PASS 空状态引导可见
++PASS 长内容出现滚动条
++PASS 滚动条很细
++PASS 短内容收起滚动条
++PASS 有内容时引导隐藏
++PASS 右侧拖宽生效
++PASS 拖宽有下限
++PASS 拖宽后底栏不越界
++PASS 浅色调色板与 P2 逻辑
++PASS 深色调色板与 P2 逻辑
++ALL PASS
++
++=== 真实鼠标 E2E（连跑 3 次全过） ===
++python evidence/e2e-mouse.py
++PASS 真实鼠标拖右边能加宽 [475->505]
++PASS 右边缘不越出屏幕 [右缘=1920]
++PASS 真实鼠标拖左边能加宽 [505->567]
++PASS 拖左边时右边缘不动 [1920->1920]
++PASS 长内容滚动条出现
++PASS 真实鼠标拖滑块能滚 [0.00->0.21]
++PASS 点轨道能跳转 [0.21->0.79]
++PASS 中间抓滑块不跳顶 [0.50->0.59]
++ALL PASS
++
++=== P2 红→绿（evidence/p2-redgreen.log） ===
++钥匙显隐：关掉实现 → FAIL；恢复 → 通过
++测试连接：关掉实现 → FAIL；恢复 → 通过
++对比度：临时调浅 FAINT_FG → FAIL；恢复 → 通过
++空状态：关掉实现 → 引导不可见；恢复 → 可见
++滚动条：关掉实现 → 不出现；恢复 → 出现
++拖宽：热区放透明边（旧 bug）→ 真鼠标拖不动 475->475；放回卡片内 → 475->505
++
++=== 深色对比度实测 ===
++MAIN 13.37:1 / SUB 7.54 / FAINT 6.18 / ICON 7.53 / 文字强调色 8.36 / 提示条 10.16
++
++=== 打包 ===
++python -m PyInstaller --noconfirm --clean 翻译小助手.spec  → Build complete
+diff --git a/evidence/test-settings-list-redgreen.log b/evidence/test-settings-list-redgreen.log
+new file mode 100644
+index 0000000..aea5b2d
+--- /dev/null
++++ b/evidence/test-settings-list-redgreen.log
+@@ -0,0 +1,11 @@
++=== 红：旧实现（逐项 font，Tk 不支持，异常被吞）===
++FAIL: test_ѡ�б�ķ���ʱ����������_�������� (tests.test_settings_list.�б���ɫ.test_ѡ�б�ķ���ʱ����������_��������)
++AssertionError: 'systemhighlighttext' != '#14171a'
++FAIL: test_ѡ��������ʱ��������ɫ (tests.test_settings_list.�б���ɫ.test_ѡ��������ʱ��������ɫ)
++AssertionError: '' != '#2563eb'
++Ran 2 tests in 0.129s
++FAILED (failures=2)
++
++=== 绿：修复后（selectforeground + foreground）===
++Ran 2 tests in 0.127s
++OK
+diff --git a/evidence/test-ui2.log b/evidence/test-ui2.log
+new file mode 100644
+index 0000000..355e190
+--- /dev/null
++++ b/evidence/test-ui2.log
+@@ -0,0 +1,44 @@
++=== 全量单测 ===
++python -m unittest discover -s tests
++Ran 81 tests
++OK
++
++=== 对话框异常（红→绿，见 test-guard-redgreen.log）===
++红：Exception 时旧代码 fail-open（删了 / 关了）→ 2 FAIL
++绿：默认按"取消"处理 → 7 tests OK
++
++=== 列表配色（真实颜色断言，tests/test_settings_list.py）===
++选中正在用 → 该行前景 #2563eb、selectforeground #1d4ed8（浅蓝底上 5.82:1）
++选中别的方案 → selectforeground #14171a；正在用那行前景仍 #2563eb；未配置行 #6b7686
++2 tests OK；红→绿记录见 test-settings-list-redgreen.log
++（Tk Listbox 不支持逐项字体，已改为 selectforeground 动态设置）
++
++=== 界面回归（125% 真机） ===
++python evidence/check_layout.py
++PASS 窗口宽==475
++PASS 状态显示/隐藏时底栏==40、翻译按钮==40
++PASS 四角遮罩@530 / @680 全部对齐
++PASS 窗口内无品红像素
++ALL PASS
++
++=== 运行时验收 ===
++python evidence/check-round2.py
++PASS DPI 缩放系数已生效 [scale=1.25]
++PASS 窗口宽度按缩放放大 [w=475]
++PASS 译文只读 / 程序写入正常 / 非本类写入被拦住
++PASS 配置窗已打开 / 锁定大小 / 未超出屏幕
++PASS 关窗提醒：点取消窗口还在
++PASS 删除确认：点取消不删
++PASS 确认后关窗成功
++ALL PASS
++
++=== 尺寸实测（物理像素，测量进程已声明 DPI 感知）===
++主窗：475x530 @ (1415,60)
++      高度比上一轮的 515 多 15px：spacing1/2/3 与 pady 补了 px() 后的正常增量
++配置窗：客户区 775x606（=620x485 逻辑，命中设计值）；外框含标题栏 793x653
++
++=== 打包与冒烟（见 build-ui2.log） ===
++python -m PyInstaller --noconfirm --clean 翻译小助手.spec  → Build complete
++启动 8 秒：EXE_ALIVE；SHOW 后窗口 475x530 —— 与源码版一致
++
++dist/翻译小助手.exe  37,695,705 字节
+diff --git a/memory/INDEX.md b/memory/INDEX.md
+index 4ab5424..9b330a4 100644
+--- a/memory/INDEX.md
++++ b/memory/INDEX.md
+@@ -1,8 +1,8 @@
+ # INDEX（2026-11-02）
+ 
+-- `session.md`：最后一次＝修"拖矮压没翻译按钮"（`_fit_panes` 收放文本框）+ 2 条回归 + exe 重打；状态待用户亲手拖一次验收。
+-- `TODO.md`：5 条待办（本轮拖拽验收、验收后提交、旧明文钥匙删除、界面 10 条验收、app.py 再拆、过期 run-a1.json）；进行中无。
+-- `project.md`：现状＝界面换代 + 可拖高矮且按钮不再消失 + exe 已重打；下一步＝用户验收、旧钥匙文件、再拆 app.py。
+-- `decisions.md`：8 条；新增 8（拖矮收文本框行数，不抬高下限）。
+-- `context.md`：模块边界不变；硬约束新增"拖完必须 `_fit_panes()` 收文本框，保证底栏不被挤出卡片"。
+-- `feedback.md`：8 条坑；新增"窗口变矮被裁要看 pack 顺序，复现量坐标不看截图"。
++- `session.md`：最后一次＝UI 审核整改 P0+P1（DPI 125%、对比度、只读、音标、配置窗保护、列表样式），独立复核通过；状态待用户验收、未提交。
++- `TODO.md`：7 条待办（本轮 7 条验收、提交、P2 七条、旧钥匙删除、旧验收单、app.py 再拆、过期 run-a1）；进行中无。
++- `project.md`：现状＝高分屏清晰 + 配置窗更稳；下一步＝用户验收、P2、旧钥匙文件。
++- `decisions.md`：12 条；新增 9–12（DPI 全量换算、确认框 fail-closed、Listbox 用 selectforeground、译文只读）。
++- `context.md`：新增 `translator_scale` 层与 4 条硬约束（常量必过 px()、只读写入口、Listbox 无逐项字体、确认框 fail-closed）。
++- `feedback.md`：12 条坑；新增控件静默失败、确认框 fail-open、DPI 测量虚拟化、像素单位辨析。
+diff --git a/memory/TODO.md b/memory/TODO.md
+index 27f51fa..81d19c5 100644
+--- a/memory/TODO.md
++++ b/memory/TODO.md
+@@ -1,7 +1,10 @@
+ # 待办
+ 
+-- 界面重做 10 条旧验收单仍未勾（`evidence/summary.md`），可与下次验收一起做（归属：用户）
++- 用户亲手验收 UI 整改 7 条（`evidence/summary.md` 的"UI 审核整改"验收单）；未回复前状态是待验收（归属：用户）
++- 用户点头后提交本轮（DPI/对比度/只读/配置窗保护等，未提交）（归属：AI）
++- P2 七条待排期：测试连接按钮、钥匙显示/隐藏、空状态引导、滚动条提示、英文字体、窗口宽度可调、深色模式（归属：AI，需用户点头）
+ - 旧明文 `config.json` / `config.my.json` 等用户确认后删除（归属：用户决策，留自 10-24）
++- 界面重做 10 条旧验收单仍未勾（`evidence/summary.md`）（归属：用户）
+ - `app.py` 约 1300 行，翻译流程 + 渲染可再拆一刀（归属：AI，L3，需用户点头）
+ - `evidence/run-a1.json` 是上一轮旧记录，已过期；下次顺手用新数据覆盖（归属：AI）
+ 
+@@ -11,12 +14,12 @@
+ 
+ # 已完成
+ 
+-- 修"拖矮压没翻译按钮"：`_fit_panes` 收放文本框行数 + 2 条回归测试 + exe 重打冒烟；用户验收全部通过 → `3cadc6f`
+-- 拉取远端 3 个提交（图钉钉住/底边框拖动/四件套）→ `b1c2743`
+-- 界面整体重做（主窗无边框圆角卡 / 配置窗重建 / 悬停气泡）+ 修状态条压扁底栏 → `63c0278`
+-- Win11 原生风视觉重做 + 键盘流（按钮取字/Alt+Q 聚焦/回车翻译）→ `0d55946`
+-- L3 保守拆分（theme/layout/settings_window）→ `18d6114`，独立验收通过
+-- 拆后重打 exe（37.5MB，冒烟通过）→ `231e7cd`
++- UI 审核整改 P0+P1（DPI 125%、对比度、只读、音标、配置窗保护、列表样式）+ 独立复核通过 → 未提交
++- 修"拖矮压没翻译按钮"：`_fit_panes` 收放文本框 + 2 条回归；用户验收通过 → `9e01cba`
++- 拉取远端 3 个提交（图钉/底边框拖动/四件套）→ `b1c2743`
++- 界面整体重做 + 修状态条压扁底栏 → `63c0278`
++- Win11 原生风视觉重做 + 键盘流 → `0d55946`
++- L3 保守拆分（theme/layout/settings_window）→ `18d6114`
+ - README + 首次推送 GitHub → `99975f0`
+ 
+ # 已放弃
+diff --git a/memory/context.md b/memory/context.md
+index e87f064..b0e870e 100644
+--- a/memory/context.md
++++ b/memory/context.md
+@@ -13,4 +13,8 @@
+ - 状态条挂在顶栏里，绝不能进卡片的主 pack 链——进了就会压扁底栏。
+ - 配置窗不能 `overrideredirect`（它是对话框，要标题栏）。
+ - 拖拽调高矮时下限仍是 `WIN_H=360`，但卡片内容（尤其两块文本框）可能更高：拖完必须调 `_fit_panes()` 收文本框行数，否则底栏会被挤出卡片。
++- 所有 96dpi 像素常量必须过 `px()`；新增控件/间距时严禁写裸数字，否则 125% 下会错位。
++- 译文区是只读的：程序写入必须走 `_dst_edit()` / `_dst_set()`，直接 insert 会被 Tk 忽略。
++- Tk Listbox 不支持逐项 `-font`；列表状态只能用 `foreground` / `selectforeground` / ✓ 表达。
++- 不可逆操作的确认框：`askyesno` 抛异常时一律按"取消"处理（fail-closed）。
+ - 测试全离线；`config.json` 不入库；exe 在 `dist/` 不入库，分发前重打。
+diff --git a/memory/decisions.md b/memory/decisions.md
+index 55fd94b..1dadbbe 100644
+--- a/memory/decisions.md
++++ b/memory/decisions.md
+@@ -8,3 +8,7 @@
+ 6. 配置窗换 tk 不换 ttk：ttk 控件不吃 `option_add("*Font")`，以前怎么设都是宋体；tk 控件才能显式控字体与配色。
+ 7. 状态提示改挂顶栏左侧，不让窗口长高：长高会让窗口在复制时抖动；顶栏左侧本来就是空的。
+ 8. 拖矮时收文本框行数，不抬高拖拽下限：下限抬到内容高度会让"拖矮"在长译文上完全失效；收行能让窗口缩到 360，译文靠滚轮看全文，按钮永远在。代价是拖矮后译文区显示行数变少（可接受）。
++9. DPI 适配选"声明感知 + 全量 px() 换算"，不换框架：真机 125% 下原来整窗被系统拉伸发虚；换 Qt 要重写全部界面且体积翻倍，不值。代价是每个像素常量都要过 px()，新代码必须守规矩。
++10. 确认框异常一律 fail-closed：删除/关窗这类不可逆或丢数据的操作，对话框坏了宁可不动，也不赌用户点的是确定。
++11. 列表"正在用"用 selectforeground 动态设置，不逐项设字体：Tk Listbox 不支持 `-font`，异常被吞后既不生效也不报错；选中态本来就会用 selectforeground 覆盖文字色，按选中项动态设它最省事。
++12. 译文区只读 + 临时解锁写入：避免用户误改结果，同时保留选中复制；所有写入走 `_dst_edit`，异常也能锁回去。
+diff --git a/memory/feedback.md b/memory/feedback.md
+index 3a447ba..e4a5387 100644
+--- a/memory/feedback.md
++++ b/memory/feedback.md
+@@ -8,3 +8,7 @@
+ 6. 效果图能省掉一轮返工：用户说不清要什么时，先出图（两张只差一个决策点）比问十个问题快；但效果图里的"死白"要按真实内容高度给，给成固定大画布会显得像坏了。
+ 7. 验收单不能写文件名/函数名：收工门会判不合格，验收单只写"你在哪儿→做什么→该看到什么"，机器证据放"验了什么"和"证据在哪"。
+ 8. "窗口变矮被裁"类 bug 要看打包顺序：Tk pack 不会自动缩文本框，最后打包的部件最先被挤出视口；复现时量 `winfo_y()+winfo_height()` 对比窗口高，比看截图可靠。改完补一条"模拟 press+drag 再量 footer"的回归测试。
++9. 控件不支持的选项会静默失败：Tk Listbox 没有逐项 `-font`，`itemconfig(font=...)` 抛 TclError，被 `except: pass` 吞掉后"看起来改了、实际没生效"。改样式前先查控件支持哪些选项，并用真实属性断言（`itemcget`/`cget`）验收。
++10. 确认框别写 fail-open：`askyesno` 外面套 `except: 确认 = True`，等于对话框一坏就直接删除。不可逆操作必须 `False`。
++11. DPI 测量有陷阱：未声明 DPI 的进程量 `GetWindowRect` 得到的是虚拟化坐标（125% 下 475 会读成 380）。测量脚本自己也要先 `SetProcessDpiAwareness(1)`，否则会把正常当 bug。
++12. 改像素前先确认单位：Tk 的 `spacing1/2/3`、`padx/pady`、按钮 `width/height`（带图片时）都是像素，必须过 px()；`height=` 行数、字号 point 不能乘。
+diff --git a/memory/project.md b/memory/project.md
+index f7565ff..8ee3cb4 100644
+--- a/memory/project.md
++++ b/memory/project.md
+@@ -4,15 +4,17 @@
+ 
+ ## 已完成
+ 
+-- 界面换代：无边框圆角白卡片（原灰标题栏已去掉）、96×32 蓝色主按钮靠左、矢量线条图标、深色圆角悬停气泡；配置窗与主窗同一套字体配色。
+-- 窗口可以拖底边调高矮；往上拖到底时翻译按钮不再消失，译文框自动收行、可滚轮看全文（2026-11-02 修）。
+-- 图钉可钉住窗口，点外面不消失；拖过位置后新译文不再弹回右上角。
+-- 原来每次复制译文会把底部按钮压没的 bug 已修（状态字改挂顶栏）。
+-- 单文件 exe 已按新代码重打（37.7MB，冒烟通过），双击即用，不用装 Python。
++- 高分屏不再发虚：按系统缩放（这台是 125%）真正适配，字、图标、间距一起放大。
++- 字和图标更清楚：浅灰标签、工具图标都加深到看得清；齿轮颜色与其它图标统一。
++- 译文区只读：能选中复制，不会被误打字改坏。
++- 词典查词：英音、美音各占一行，不会把"美"和音标拆成两行。
++- 配置窗：锁定 620×480 尺寸、标题栏是蓝底"译"、删除先确认、关掉时提醒未保存、列表用 ✓+蓝字标"正在用"。
++- 图标间距拉开，复制与关闭不易误点；悬停提示不再 1.5 秒自己消失。
++- 窗口可拖底边调高矮，往上拖到底按钮不消失；图钉可钉住；拖过位置不弹回。
++- exe 已按最新代码重打（37.7MB），双击即用。
+ 
+ ## 下一步（都要用户点头）
+ 
+-- 用户亲手拖一次底边验收本次修复。
+-- 界面重做 10 条验收单（见 `evidence/summary.md`）。
+-- 旧明文钥匙文件删除确认。
+-- `app.py` 约 1300 行，再拆翻译流程和渲染（L3，另排期）。
++- 用户亲手验收本轮 7 条（见 `evidence/summary.md`）。
++- P2 七条：测试连接按钮、钥匙显示/隐藏、空状态引导、滚动条提示、英文字体、窗口宽度可调、深色模式。
++- 旧明文钥匙文件删除确认；`app.py` 再拆（L3）。
+diff --git a/memory/session.md b/memory/session.md
+index 9e61f71..4905913 100644
+--- a/memory/session.md
++++ b/memory/session.md
+@@ -1,7 +1,7 @@
+ # 最后一次（2026-11-02）
+ 
+-- 做了什么：修"底边手柄往上拖时翻译按钮消失"。拖拽下限只按 `WIN_H=360` 钳，卡片内容实际要 432，Tk 不会自动缩文本框，最后打包的底栏被挤出卡片（footer 底边 405 > 窗口 360）；改成拖拽后按可用高度收放译文/原文框行数，`_refit` 也收口。
+-- 为什么：用户截图反馈"向上调整时，翻译按钮会消失"，要的是拖矮后按钮仍在、内容可滚动。
+-- 结果：新回归 2 条（红：405>360 → 绿）；全量 71 单测 OK；`evidence/check_layout.py` ALL PASS；拖到 360 高截图 `evidence/drag-after.png` 按钮完整；exe 已重打（37,688,294 字节）冒烟通过 8s；旧 `pythonw app.py` 已用新代码重新拉起。
+-- 待验收：用户已回复"全部通过"（2026-11-02），本轮已提交 `3cadc6f`。
+-- 下一步：界面重做 10 条旧验收单仍未勾；`app.py` 再拆另排期；旧明文 `config.json` 待用户确认删除；未推送，等用户发话再 push。
++- 做了什么：按"资深 UI 设计师审核"结论做 P0+P1 整改。P0：真机 125% 下声明 DPI 感知 + 新增 `translator_scale.py`（px() 全量换算、tk scaling 同步）；浅灰字/图标加深（FAINT 3.07→4.6、ICON 2.58→4.31）；配置窗锁 620×480 逻辑尺寸并收紧间距；删除二次确认；词典英/美音标各占一行。P1：配置窗标题栏换品牌图标；齿轮颜色统一；复制与关闭拉开；译文区只读；关窗提醒未保存；提示 1.5s→8s 兜底；列表"正在用"用 ✓+蓝字（selectforeground 动态设置）。
++- 为什么：用户要求审核 UI 并同意结论，要求一步一步优化、不必每步汇报。
++- 结果：81 单测 OK（新增 10 条）；check_layout / check-round2 ALL PASS；独立复核三轮（打回→打回→证据不足→通过），blocking 已清零；exe 重打 37,695,705 字节，SHOW 出窗 475×530，源码版已重新拉起。
++- 待验收：`evidence/summary.md` 新一轮 7 条（用户亲手点）。
++- 下一步：P2 七条（测试连接、钥匙显隐、空状态、滚动条提示、英文字体、窗口宽度、深色模式）；本轮改动未提交，等用户发话。
+diff --git a/tests/test_drag_fit.py b/tests/test_drag_fit.py
+index 1d42175..66657f9 100644
+--- a/tests/test_drag_fit.py
++++ b/tests/test_drag_fit.py
+@@ -3,6 +3,9 @@ import sys
+ import unittest
+ from types import SimpleNamespace
+ 
++from translator_layout import FOOTER_H, MARGIN
++from translator_scale import px
++
+ try:
+     import tkinter as tk
+     try:
+@@ -50,10 +53,10 @@ class 拖矮不压按钮(unittest.TestCase):
+         self._拖到(窗, -400)
+ 
+         高 = 窗.root.winfo_height()
+-        底 = 8 + 窗.footer.winfo_y() + 窗.footer.winfo_height()
++        底 = MARGIN + 窗.footer.winfo_y() + 窗.footer.winfo_height()
+         self.assertLessEqual(底, 高, f"底栏底边 {底} 超出窗口 {高}")
+-        self.assertEqual(窗.footer.winfo_height(), 32)
+-        self.assertEqual(窗.translate_btn.winfo_height(), 32)
++        self.assertEqual(窗.footer.winfo_height(), FOOTER_H)
++        self.assertEqual(窗.translate_btn.winfo_height(), FOOTER_H)
+ 
+     def test_拖矮再拖高原文框恢复(self):
+         窗 = self._起窗()
+@@ -68,6 +71,38 @@ class 拖矮不压按钮(unittest.TestCase):
+ 
+         self.assertEqual(int(窗.src_text.cget("height")), 自然)
+ 
++    def test_译文区只读且程序还能写入(self):
++        窗 = self._起窗()
++        self.assertEqual(str(窗.dst_text.cget("state")), "disabled")
++        窗._dst_set("测试内容")
++        self.assertEqual(窗.dst_text.get("1.0", "end-1c"), "测试内容")
++        self.assertEqual(str(窗.dst_text.cget("state")), "disabled")
++
++    def test_左右拖宽有下限且底栏不越界(self):
++        窗 = self._起窗()
++        窗.popup()
++        窗.root.update()
++        窗._refit()
++        窗.root.update()
++        起 = 窗.root.winfo_width()
++
++        x = float(窗.root.winfo_rootx() + 起)
++        窗._width_press_r(SimpleNamespace(x_root=x))
++        窗._width_drag(SimpleNamespace(x_root=x + 120))
++        窗.root.update()
++        self.assertGreater(窗.root.winfo_width(), 起)
++
++        x2 = float(窗.root.winfo_rootx() + 窗.root.winfo_width())
++        窗._width_press_r(SimpleNamespace(x_root=x2))
++        窗._width_drag(SimpleNamespace(x_root=x2 - 2000))
++        窗.root.update()
++        self.assertEqual(窗.root.winfo_width(), px(320))
++        窗._width_release()
++        窗.root.update()
++
++        底 = MARGIN + 窗.footer.winfo_y() + 窗.footer.winfo_height()
++        self.assertLessEqual(底, 窗.root.winfo_height())
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/tests/test_layout.py b/tests/test_layout.py
+index e09d652..cd3c358 100644
+--- a/tests/test_layout.py
++++ b/tests/test_layout.py
+@@ -10,47 +10,54 @@ import unittest
+ 
+ import translator_layout
+ import translator_theme
++from translator_scale import px
+ 
+ 
+ class 窗口高度测试(unittest.TestCase):
+     def test_短内容保持最小高度(self):
+-        self.assertEqual(translator_layout._算窗口高度(1, 1, 20, 1080), translator_layout.WIN_H)
++        self.assertEqual(translator_layout._算窗口高度(1, 1, px(20), 1080), translator_layout.WIN_H)
+ 
+     def test_长内容按行数变高(self):
+-        高度 = translator_layout._算窗口高度(8, 20, 20, 1080)
++        高度 = translator_layout._算窗口高度(8, 20, px(20), 1080)
+         self.assertGreater(高度, translator_layout.WIN_H)
+         self.assertLessEqual(高度, int(1080 * 0.72))
+ 
+     def test_超长内容不超过屏幕上限(self):
+-        self.assertLessEqual(translator_layout._算窗口高度(50, 200, 20, 1080), int(1080 * 0.72))
++        self.assertLessEqual(translator_layout._算窗口高度(50, 200, px(20), 1080), int(1080 * 0.72))
+ 
+     def test_小屏也不低于最小高度(self):
+-        self.assertEqual(translator_layout._算窗口高度(1, 1, 20, 400), translator_layout.WIN_H)
++        self.assertEqual(translator_layout._算窗口高度(1, 1, px(20), 400), translator_layout.WIN_H)
+ 
+     def test_行数为零当作一行(self):
+-        self.assertEqual(translator_layout._算窗口高度(0, 0, 20, 1080), translator_layout.WIN_H)
++        self.assertEqual(translator_layout._算窗口高度(0, 0, px(20), 1080), translator_layout.WIN_H)
+ 
+     def test_原文高度等于文本加18像素(self):
+-        self.assertEqual(translator_layout._算原文高度(200, 17, 19), 17 + 6 + 200 + 18)
++        self.assertEqual(
++            translator_layout._算原文高度(200, 17, 19),
++            17 + translator_layout.原文标题间隙 + 200 + translator_layout.原文底隙,
++        )
+ 
+     def test_空原文至少留一行加18像素(self):
+-        self.assertEqual(translator_layout._算原文高度(0, 17, 19), 17 + 6 + 19 + 18)
++        self.assertEqual(
++            translator_layout._算原文高度(0, 17, 19),
++            17 + translator_layout.原文标题间隙 + 19 + translator_layout.原文底隙,
++        )
+ 
+ 
+ class 无边框卡片节奏测试(unittest.TestCase):
+     def test_1行内容回最小高度(self):
+         self.assertEqual(
+-            translator_layout._算窗口高度(1, 1, 20, 1080), translator_layout.WIN_H
++            translator_layout._算窗口高度(1, 1, px(20), 1080), translator_layout.WIN_H
+         )
+ 
+     def test_6行译文撑高窗口(self):
+         self.assertGreater(
+-            translator_layout._算窗口高度(3, 6, 20, 1080), translator_layout.WIN_H
++            translator_layout._算窗口高度(3, 6, px(20), 1080), translator_layout.WIN_H
+         )
+ 
+     def test_超长内容仍卡屏幕上限(self):
+         self.assertLessEqual(
+-            translator_layout._算窗口高度(50, 200, 20, 1080), int(1080 * 0.72)
++            translator_layout._算窗口高度(50, 200, px(20), 1080), int(1080 * 0.72)
+         )
+ 
+     def test_固定铬等于文档化垂直节奏之和(self):
+@@ -76,7 +83,7 @@ class 无边框卡片节奏测试(unittest.TestCase):
+         self.assertEqual(translator_layout.LABEL_H, translator_theme.ICON_BTN)
+ 
+     def test_固定铬等于203(self):
+-        self.assertEqual(translator_layout.FIXED_CHROME, 203)
++        self.assertEqual(translator_layout.FIXED_CHROME, px(203))
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/tests/test_p2.py b/tests/test_p2.py
+new file mode 100644
+index 0000000..a014753
+--- /dev/null
++++ b/tests/test_p2.py
+@@ -0,0 +1,135 @@
++"""P2 行为测试：钥匙显隐、测试连接成功/失败、深色/浅色调色板对比度。不建窗口。"""
++import time
++import unittest
++
++import translator_settings_window as SW
++import translator_theme as T
++
++
++class _假框:
++    def __init__(self, 值=""):
++        self.值 = 值
++        self.配置 = {}
++
++    def configure(self, **k):
++        self.配置.update(k)
++
++
++class _假变量:
++    def __init__(self, 值=""):
++        self.值 = 值
++
++    def get(self):
++        return self.值
++
++    def set(self, v):
++        self.值 = v
++
++
++class _假窗:
++    def after(self, _ms, fn):
++        fn()
++
++
++def _假自己(url="https://x/v1", key="k", model="m"):
++    me = SW.SettingsWindowMixin.__new__(SW.SettingsWindowMixin)
++    me.s_url_var = _假变量(url)
++    me.s_key_var = _假变量(key)
++    me.s_model_var = _假变量(model)
++    me.s_hint_var = _假变量("")
++    me.settings_win = _假窗()
++    me.test_btn = _假框()
++    me.s_key_entry = _假框()
++    me.key_toggle = _假框()
++    me._key_shown = False
++    return me
++
++
++class 钥匙显隐(unittest.TestCase):
++    def test_点一下显示再点一下隐藏(self):
++        me = _假自己()
++        me._toggle_key_show()
++        self.assertEqual(me.s_key_entry.配置.get("show"), "")
++        self.assertEqual(me.key_toggle.配置.get("text"), "隐藏")
++        me._toggle_key_show()
++        self.assertEqual(me.s_key_entry.配置.get("show"), "*")
++        self.assertEqual(me.key_toggle.配置.get("text"), "显示")
++
++
++class 测试连接(unittest.TestCase):
++    def _跑(self, me, 耗时上限=2.0):
++        起 = time.time()
++        while time.time() - 起 < 耗时上限:
++            if "测试" not in str(me.s_hint_var.值):
++                return me.s_hint_var.值
++            time.sleep(0.01)
++        return me.s_hint_var.值
++
++    def test_成功时给正常提示(self):
++        me = _假自己()
++        原 = SW._接口chat
++        try:
++            SW._接口chat = lambda *a, **k: "正常"
++            me._settings_test()
++            结果 = self._跑(me)
++        finally:
++            SW._接口chat = 原
++        self.assertIn("连接正常", 结果)
++        self.assertEqual(me.test_btn.配置.get("state"), "normal")
++
++    def test_失败时给失败提示(self):
++        me = _假自己()
++        原 = SW._接口chat
++
++        def _炸(*a, **k):
++            raise RuntimeError("超时")
++
++        try:
++            SW._接口chat = _炸
++            me._settings_test()
++            结果 = self._跑(me)
++        finally:
++            SW._接口chat = 原
++        self.assertIn("连接失败", 结果)
++
++    def test_缺字段不发请求(self):
++        me = _假自己(key="")
++        调用 = []
++        原 = SW._接口chat
++        try:
++            SW._接口chat = lambda *a, **k: 调用.append(1) or "正常"
++            me._settings_test()
++        finally:
++            SW._接口chat = 原
++        self.assertEqual(调用, [])
++        self.assertIn("三样都填好", me.s_hint_var.值)
++
++
++def _对比度(a, b):
++    def 亮度(h):
++        h = h.lstrip("#")
++        c = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
++        c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
++        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
++
++    la, lb = 亮度(a), 亮度(b)
++    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
++
++
++class 调色板对比度(unittest.TestCase):
++    def test_当前模式文字和图标够清楚(self):
++        self.assertGreaterEqual(_对比度(T.FAINT_FG, T.CARD_BG), 4.5)
++        self.assertGreaterEqual(_对比度(T.SUB_FG, T.CARD_BG), 4.5)
++        self.assertGreaterEqual(_对比度(T.MAIN_FG, T.CARD_BG), 7.0)
++        self.assertGreaterEqual(_对比度(T.ICON_FG, T.CARD_BG), 3.0)
++        self.assertGreaterEqual(_对比度(T.TIP_FG, T.TIP_BG), 4.5)
++        self.assertGreaterEqual(_对比度(T.ACCENT_TEXT, T.CARD_BG), 4.5)
++
++    def test_界面不许用品红色(self):
++        for 名 in ("CARD_BG", "MAIN_FG", "SUB_FG", "FAINT_FG", "LINE", "EDGE",
++                   "HOVER_BG", "ICON_FG", "PAGE_BG", "SELECT_BG", "TIP_BG"):
++            self.assertNotEqual(getattr(T, 名).upper(), "#FF00FE", 名)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/test_resize.py b/tests/test_resize.py
+index ce0a493..fbcb109 100644
+--- a/tests/test_resize.py
++++ b/tests/test_resize.py
+@@ -3,7 +3,10 @@ import unittest
+ 
+ from app import _是否该藏
+ from translator_layout import WIN_H, _钳制窗口高度
+-from translator_theme import _corner_kind
++from translator_scale import px
++from translator_theme import RADIUS, _corner_kind
++
++边 = px(13)
+ 
+ 
+ class 高度钳制(unittest.TestCase):
+@@ -11,7 +14,7 @@ class 高度钳制(unittest.TestCase):
+         self.assertEqual(_钳制窗口高度(100, 1080), WIN_H)
+ 
+     def test_过高钳到屏幕上限(self):
+-        上限 = max(WIN_H, min(int(1080 * 0.72), 900))
++        上限 = max(WIN_H, min(int(1080 * 0.72), px(900)))
+         self.assertEqual(_钳制窗口高度(2000, 1080), 上限)
+ 
+     def test_区间内原样返回(self):
+@@ -20,18 +23,20 @@ class 高度钳制(unittest.TestCase):
+ 
+ class 四角对称(unittest.TestCase):
+     def test_外角透明内里白(self):
+-        self.assertEqual(_corner_kind("tl", 0, 0), "transparent")
+-        self.assertEqual(_corner_kind("tl", 12, 12), "white")
+-        self.assertEqual(_corner_kind("br", 12, 12), "transparent")
+-        self.assertEqual(_corner_kind("br", 0, 0), "white")
++        末 = 边 - 1
++        self.assertEqual(_corner_kind("tl", 0, 0, 边=边), "transparent")
++        self.assertEqual(_corner_kind("tl", 末, 末, 边=边), "white")
++        self.assertEqual(_corner_kind("br", 末, 末, 边=边), "transparent")
++        self.assertEqual(_corner_kind("br", 0, 0, 边=边), "white")
+ 
+     def test_四角镜像对称(self):
+-        for y in range(13):
+-            for x in range(13):
+-                基 = _corner_kind("tl", x, y)
+-                self.assertEqual(_corner_kind("tr", 12 - x, y), 基, f"tr({12 - x},{y})")
+-                self.assertEqual(_corner_kind("bl", x, 12 - y), 基, f"bl({x},{12 - y})")
+-                self.assertEqual(_corner_kind("br", 12 - x, 12 - y), 基)
++        末 = 边 - 1
++        for y in range(边):
++            for x in range(边):
++                基 = _corner_kind("tl", x, y, 边=边)
++                self.assertEqual(_corner_kind("tr", 末 - x, y, 边=边), 基, f"tr({末 - x},{y})")
++                self.assertEqual(_corner_kind("bl", x, 末 - y, 边=边), 基, f"bl({x},{末 - y})")
++                self.assertEqual(_corner_kind("br", 末 - x, 末 - y, 边=边), 基)
+ 
+ 
+ class 钉住逻辑(unittest.TestCase):
+diff --git a/tests/test_settings_guard.py b/tests/test_settings_guard.py
+new file mode 100644
+index 0000000..ebe4c71
+--- /dev/null
++++ b/tests/test_settings_guard.py
+@@ -0,0 +1,139 @@
++"""配置窗保护：删除要确认、没保存的改动关窗前要问。纯逻辑，不建窗口。"""
++import unittest
++
++import translator_settings_window as SW
++
++
++class _假窗:
++    def __init__(self):
++        self.destroyed = False
++
++    def destroy(self):
++        self.destroyed = True
++
++
++class _假列表:
++    def curselection(self):
++        return (0,)
++
++
++class _假变量:
++    def __init__(self):
++        self.text = ""
++
++    def set(self, v):
++        self.text = v
++
++
++def _假自己():
++    me = SW.SettingsWindowMixin.__new__(SW.SettingsWindowMixin)
++    me.settings_win = _假窗()
++    me.prof_list = _假列表()
++    me._prof_names = ["备用"]
++    me.s_hint_var = _假变量()
++    me._s_dirty = False
++    return me
++
++
++class 删除二次确认(unittest.TestCase):
++    def test_点取消不删(self):
++        me = _假自己()
++        记录 = []
++        原_删除 = SW.delete_profile
++        原_询问 = SW.messagebox.askyesno
++        try:
++            SW.delete_profile = lambda 名: 记录.append(名)
++            SW.messagebox.askyesno = lambda *a, **k: False
++            me._settings_delete()
++        finally:
++            SW.delete_profile = 原_删除
++            SW.messagebox.askyesno = 原_询问
++        self.assertEqual(记录, [], "点了取消却还是删了")
++
++    def test_点确定才删(self):
++        me = _假自己()
++        记录 = []
++
++        def _假删(名):
++            记录.append(名)
++            return "备用"
++
++        me._refresh_settings_list = lambda **k: None
++        me._home_status = lambda: None
++        原_删除 = SW.delete_profile
++        原_询问 = SW.messagebox.askyesno
++        try:
++            SW.delete_profile = _假删
++            SW.messagebox.askyesno = lambda *a, **k: True
++            me._settings_delete()
++        finally:
++            SW.delete_profile = 原_删除
++            SW.messagebox.askyesno = 原_询问
++        self.assertEqual(记录, ["备用"])
++
++
++class 关窗提醒(unittest.TestCase):
++    def test_有改动点取消不关(self):
++        me = _假自己()
++        me._s_dirty = True
++        原_询问 = SW.messagebox.askyesno
++        try:
++            SW.messagebox.askyesno = lambda *a, **k: False
++            me._settings_close()
++        finally:
++            SW.messagebox.askyesno = 原_询问
++        self.assertFalse(me.settings_win.destroyed, "点了取消却把窗口关了")
++
++    def test_没改动直接关(self):
++        me = _假自己()
++        me._settings_close()
++        self.assertTrue(me.settings_win.destroyed)
++
++    def test_有改动点确定就关(self):
++        me = _假自己()
++        me._s_dirty = True
++        原_询问 = SW.messagebox.askyesno
++        try:
++            SW.messagebox.askyesno = lambda *a, **k: True
++            me._settings_close()
++        finally:
++            SW.messagebox.askyesno = 原_询问
++        self.assertTrue(me.settings_win.destroyed)
++
++    def test_询问框出错时不删(self):
++        me = _假自己()
++        记录 = []
++        原_删除 = SW.delete_profile
++        原_询问 = SW.messagebox.askyesno
++        try:
++            SW.delete_profile = lambda 名: 记录.append(名)
++
++            def _炸(*a, **k):
++                raise RuntimeError("对话框坏了")
++
++            SW.messagebox.askyesno = _炸
++            me._settings_delete()
++        finally:
++            SW.delete_profile = 原_删除
++            SW.messagebox.askyesno = 原_询问
++        self.assertEqual(记录, [], "确认框出错却还是删了")
++
++
++class 关窗异常路径(unittest.TestCase):
++    def test_询问框出错时不关(self):
++        me = _假自己()
++        me._s_dirty = True
++        原_询问 = SW.messagebox.askyesno
++        try:
++            def _炸(*a, **k):
++                raise RuntimeError("对话框坏了")
++
++            SW.messagebox.askyesno = _炸
++            me._settings_close()
++        finally:
++            SW.messagebox.askyesno = 原_询问
++        self.assertFalse(me.settings_win.destroyed, "提醒框出错却把窗口关了")
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/test_settings_list.py b/tests/test_settings_list.py
+new file mode 100644
+index 0000000..d951346
+--- /dev/null
++++ b/tests/test_settings_list.py
+@@ -0,0 +1,55 @@
++"""配置窗列表配色：正在用=蓝字+✓，选中=浅蓝底；断言真实颜色，不只断言"没报错"。需显示环境。"""
++import sys
++import unittest
++
++import translator_scale  # noqa: F401  先声明 DPI，再建 Tk（测试卫生）
++
++try:
++    import tkinter as tk
++
++    _探 = tk.Tk()
++    _探.withdraw()
++    _探.destroy()
++    _显示可用 = True
++except Exception:
++    _显示可用 = False
++
++from translator_settings_window import SettingsWindowMixin
++from translator_theme import ACCENT_TEXT, FAINT_FG, MAIN_FG, SELECT_FG_ACCENT
++
++
++@unittest.skipUnless(sys.platform == "win32" and _显示可用, "需 Windows 显示环境")
++class 列表配色(unittest.TestCase):
++    def setUp(self):
++        self.root = tk.Tk()
++        self.root.withdraw()
++        self.lb = tk.Listbox(self.root)
++        for 标签 in ("✓ a", "b", "c（未配置）"):
++            self.lb.insert("end", 标签)
++        self.me = SettingsWindowMixin.__new__(SettingsWindowMixin)
++        self.me.prof_list = self.lb
++        self.me._cur_index = 0
++        self.me._row_state = [("a", True), ("b", True), ("c", False)]
++        self.addCleanup(self.root.destroy)
++
++    def _前景(self, i):
++        return str(self.lb.itemcget(i, "foreground")).lower()
++
++    def _选中字色(self):
++        return str(self.lb.cget("selectforeground")).lower()
++
++    def test_选中正在用时文字是蓝色(self):
++        self.lb.selection_set(0)
++        self.me._apply_list_style()
++        self.assertEqual(self._前景(0), ACCENT_TEXT.lower(), "正在用那行没有蓝色")
++        self.assertEqual(self._选中字色(), SELECT_FG_ACCENT.lower(), "选中态把蓝色盖掉了")
++
++    def test_选中别的方案时正在用仍蓝_其余正常(self):
++        self.lb.selection_set(1)
++        self.me._apply_list_style()
++        self.assertEqual(self._选中字色(), MAIN_FG.lower())
++        self.assertEqual(self._前景(0), ACCENT_TEXT.lower(), "正在用那行丢了蓝色")
++        self.assertEqual(self._前景(2), FAINT_FG.lower(), "未配置那行没有变浅")
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/test_window_pos.py b/tests/test_window_pos.py
+index 5cf3b8b..e2f5231 100644
+--- a/tests/test_window_pos.py
++++ b/tests/test_window_pos.py
+@@ -2,6 +2,8 @@
+ import sys
+ import unittest
+ 
++from translator_scale import px
++
+ try:
+     import tkinter as tk
+     try:
+@@ -43,14 +45,14 @@ class 位置保持(unittest.TestCase):
+         屏宽 = 窗.root.winfo_screenwidth()
+         窗.popup()
+         窗.root.update()
+-        self.assertEqual(窗.root.winfo_x(), max(0, 屏宽 - A.WIN_W - 24))
+-        self.assertEqual(窗.root.winfo_y(), 48)
++        self.assertEqual(窗.root.winfo_x(), max(0, 屏宽 - A.WIN_W - px(24)))
++        self.assertEqual(窗.root.winfo_y(), px(48))
+ 
+     def test_底边框线在拖拽区之上(self):
+         窗 = self._起窗()
+         线 = 窗._bottom_line
+         区 = 窗._resize_zone
+-        self.assertEqual(线.place_info()["y"], str(窗._window_h - 9))
++        self.assertEqual(线.place_info()["y"], str(窗._window_h - px(8) - 1))
+         self.assertEqual(
+             int(区.place_info()["y"]) + int(区.place_info()["height"]),
+             int(线.place_info()["y"]),
+diff --git a/translator_layout.py b/translator_layout.py
+index 8e6adeb..1135c41 100644
+--- a/translator_layout.py
++++ b/translator_layout.py
+@@ -2,7 +2,7 @@
+ 
+ [INPUT] 行数、行高、屏幕高等纯数值。
+ [OUTPUT] 原文区高度、窗口高度（像素整数）。
+-[POS] 纯计算模块；被 app.py 依赖；不 import 本项目任何模块。
++[POS] 纯计算模块；被 app.py 依赖；只 import 环境层 translator_scale（DPI 换算）。
+ [PROTOCOL] 原文区 = 标题 + 6 + 文本 + 18 像素空隙；窗口高度按内容行数估算，夹在最小高度和屏幕上限之间。
+ 
+ 无边框卡片垂直节奏（外窗 380 宽，上下各 8px 透明边，卡片 364 宽）：
+@@ -13,20 +13,25 @@
+ 顶栏 28px = 内含 28px 图标按钮（ICON_BTN），与 translator_theme.ICON_BTN 同值。
+ """
+ 
+-WIN_W, WIN_H = 380, 360
+-
+-MARGIN = 8
+-TOP_PAD = 12
+-HEADER_H = 28
+-GAP_AFTER_HEADER = 8
+-GAP_BEFORE_DIV = 22
+-DIV_H = 9
+-GAP_AFTER_DIV = 14
+-LABEL_H = 28
+-GAP_AFTER_LABEL = 6
+-GAP_BEFORE_FOOTER = 10
+-FOOTER_H = 32
+-BOTTOM_PAD = 18
++from translator_scale import px
++
++# 下面是 96dpi 设计稿数值，统一过 px() 换算成当前屏幕像素。
++WIN_W, WIN_H = px(380), px(360)
++
++MARGIN = px(8)
++TOP_PAD = px(12)
++HEADER_H = px(28)
++GAP_AFTER_HEADER = px(8)
++GAP_BEFORE_DIV = px(22)
++DIV_H = px(9)
++GAP_AFTER_DIV = px(14)
++LABEL_H = px(28)
++GAP_AFTER_LABEL = px(6)
++GAP_BEFORE_FOOTER = px(10)
++FOOTER_H = px(32)
++BOTTOM_PAD = px(18)
++原文标题间隙 = px(6)
++原文底隙 = px(18)
+ 
+ FIXED_CHROME = (
+     MARGIN * 2
+@@ -46,12 +51,12 @@ FIXED_CHROME = (
+ 
+ def _算原文高度(文本像素, 题高, 行高):
+     """原文区 = 标题 + 6 + 文本 + 18 像素空隙；空文本至少留一行。"""
+-    return 题高 + 6 + max(int(文本像素), int(行高)) + 18
++    return 题高 + 原文标题间隙 + max(int(文本像素), int(行高)) + 原文底隙
+ 
+ 
+ def _钳制窗口高度(想要, 屏幕高):
+     """把任意高度钳在 [最小高度, 屏幕上限] 之间；拖拽手柄与自动算高共用。"""
+-    上限 = max(WIN_H, min(int(屏幕高 * 0.72), 900))
++    上限 = max(WIN_H, min(int(屏幕高 * 0.72), px(900)))
+     return max(WIN_H, min(int(想要), 上限))
+ 
+ 
+diff --git a/translator_scale.py b/translator_scale.py
+new file mode 100644
+index 0000000..ed64975
+--- /dev/null
++++ b/translator_scale.py
+@@ -0,0 +1,55 @@
++"""translator_scale.py
++[INPUT] 无（读 Windows 系统 DPI；可用 TRANSLATOR_UI_SCALE 环境变量覆盖，仅作预览用）。
++[OUTPUT] UI_SCALE（1.0 = 100%）、px(值) 像素换算、tk_scaling() 字号基准。
++[POS] 环境层：零项目依赖；被 theme / layout / app / settings_window 共用。
++[PROTOCOL] 导入即声明进程 DPI 感知；所有 96dpi 设计稿像素都必须过 px()，字号用 point 由 Tk 自己缩放。
++"""
++
++import ctypes
++import os
++
++
++def _声明_dpi_感知():
++    """必须在任何 Tk 窗口创建之前调用，否则 Windows 会把整窗当图片拉大（发虚）。"""
++    try:
++        ctypes.windll.shcore.SetProcessDpiAwareness(1)
++    except Exception:
++        try:
++            ctypes.windll.user32.SetProcessDPIAware()
++        except Exception:
++            pass
++
++
++def _系统_dpi():
++    try:
++        return int(ctypes.windll.user32.GetDpiForSystem())
++    except Exception:
++        pass
++    try:
++        hdc = ctypes.windll.user32.GetDC(0)
++        dpi = int(ctypes.windll.gdi32.GetDeviceCaps(hdc, 88))  # LOGPIXELSX
++        ctypes.windll.user32.ReleaseDC(0, hdc)
++        return dpi
++    except Exception:
++        return 96
++
++
++_声明_dpi_感知()
++
++_覆盖 = os.environ.get("TRANSLATOR_UI_SCALE", "").strip()
++try:
++    UI_SCALE = float(_覆盖) if _覆盖 else _系统_dpi() / 96.0
++except Exception:
++    UI_SCALE = _系统_dpi() / 96.0
++
++UI_SCALE = max(1.0, min(UI_SCALE, 2.0))
++
++
++def px(值):
++    """把 96dpi 设计稿上的像素换算成当前屏幕像素。"""
++    return int(round(float(值) * UI_SCALE))
++
++
++def tk_scaling():
++    """Tk 的点→像素基准，与 px() 同步，字体和留白一起放大。"""
++    return 96.0 * UI_SCALE / 72.0
+diff --git a/translator_settings_window.py b/translator_settings_window.py
+index 9a3248e..07cfa1e 100644
+--- a/translator_settings_window.py
++++ b/translator_settings_window.py
+@@ -26,6 +26,12 @@ except Exception:
+     create_empty_profile = None
+     is_profile_configured = None
+ 
++try:
++    from translator_provider import chat as _接口chat
++except Exception:
++    _接口chat = None
++
++from translator_scale import px
+ from translator_theme import (
+     FONT,
+     SRC_FONT,
+@@ -36,8 +42,16 @@ from translator_theme import (
+     LINE,
+     CARD_BG,
+     ACCENT,
++    ACCENT_HOVER,
+     HOVER_BG,
+     EDGE,
++    PAGE_BG,
++    SELECT_BG,
++    SELECT_FG_ACCENT,
++    SECONDARY_HOVER,
++    ACCENT_TEXT,
++    ERROR_FG,
++    DARK,
+     _make_primary_button_image,
+     _make_secondary_button_image,
+ )
+@@ -58,18 +72,47 @@ class SettingsWindowMixin:
+         if load_profiles is None:
+             self._say_transient("核心模块还没准备好，稍后再打开配置")
+             return
+-        页底 = "#F7F8FA"
+-        win = tk.Toplevel(self.root)
+-        self.settings_win = win
+-        win.title("配置")
+-        win.geometry("620x480")
++        页底 = PAGE_BG
++        原色键 = None
++        if DARK:
++            # 主窗的色键会让新窗口的标题栏变不了深色：建窗前摘掉，设完立刻恢复
++            try:
++                原色键 = self.root.wm_attributes("-transparentcolor")
++                self.root.wm_attributes("-transparentcolor", "")
++            except Exception:
++                原色键 = None
++        try:
++            win = tk.Toplevel(self.root)
++            self.settings_win = win
++            win.title("配置")
++            win.geometry(f"{px(620)}x{px(480)}")
++            try:
++                win.resizable(False, False)
++            except Exception:
++                pass
++            if DARK:
++                win.update()
++                self._apply_dark_titlebar(win)
++        finally:
++            if 原色键:
++                try:
++                    self.root.wm_attributes("-transparentcolor", 原色键)
++                except Exception:
++                    pass
++
++        try:
++            win.protocol("WM_DELETE_WINDOW", lambda: self._settings_close(win))
++        except Exception:
++            pass
+         win.attributes("-topmost", True)
+         win.configure(bg=页底)
+         win.option_add("*Font", FONT)
+         self._refreshing_list = False
++        self._refreshing_fields = False
++        self._s_dirty = False
+         self._prof_names = []
+ 
+-        left = tk.Frame(win, bg=页底, width=212)
++        left = tk.Frame(win, bg=页底, width=px(212))
+         left.pack(side="left", fill="y")
+         try:
+             left.pack_propagate(False)
+@@ -80,26 +123,21 @@ class SettingsWindowMixin:
+         tk.Label(
+             left, text="方案（点一下就换）", font=SRC_FONT, fg=SUB_FG, bg=页底,
+             anchor="w",
+-        ).pack(fill="x", padx=20, pady=(20, 10))
++        ).pack(fill="x", padx=px(20), pady=(px(18), px(8)))
+         list_wrap = tk.Frame(
+             left, bg=CARD_BG, bd=0,
+             highlightthickness=1, highlightbackground=EDGE, highlightcolor=ACCENT,
+         )
+-        list_wrap.pack(fill="both", expand=True, padx=20, pady=(0, 10))
++        list_wrap.pack(fill="both", expand=True, padx=px(20), pady=(0, px(8)))
+         self.prof_list = tk.Listbox(
+             list_wrap, font=FONT, bd=0, relief="flat",
+             highlightthickness=0, bg=CARD_BG, fg=MAIN_FG,
+-            selectbackground="#E8EFFF", selectforeground=MAIN_FG,
++            selectbackground=SELECT_BG, selectforeground=MAIN_FG,
++            selectborderwidth=0,
+             activestyle="none", exportselection=False,
+         )
+-        self.prof_list.pack(fill="both", expand=True, padx=6, pady=4)
+-        self.prof_list.bind("<<ListboxSelect>>", lambda _e: self._on_profile_selected())
+-        self.prof_list.bind(
+-            "<FocusIn>", lambda _e: list_wrap.configure(highlightbackground=ACCENT)
+-        )
+-        self.prof_list.bind(
+-            "<FocusOut>", lambda _e: list_wrap.configure(highlightbackground=EDGE)
+-        )
++        self.prof_list.pack(fill="both", expand=True, padx=px(6), pady=px(4))
++        self.prof_list.bind("<<ListboxSelect>>", self._on_list_select)
+ 
+         def _bind_hover(btn, imgs):
+             def on_enter(_e=None):
+@@ -144,35 +182,35 @@ class SettingsWindowMixin:
+             relief="flat", bd=0, highlightthickness=0, cursor="hand2",
+             takefocus=0, bg=页底, fg=MAIN_FG,
+             activebackground=页底, activeforeground=MAIN_FG,
+-            font=FONT, width=148, height=32, padx=0, pady=0,
++            font=FONT, width=px(148), height=px(32), padx=0, pady=0,
+         )
+         if not self._s_add_imgs:
+             try:
+                 add_btn.configure(image="", bg=HOVER_BG, activebackground="#E6E9EF")
+             except Exception:
+                 pass
+-        add_btn.pack(fill="x", padx=20, pady=(0, 20))
++        add_btn.pack(fill="x", padx=px(20), pady=(0, px(16)))
+         _bind_hover(add_btn, self._s_add_imgs)
+ 
+         right = tk.Frame(win, bg=CARD_BG)
+         right.pack(side="left", fill="both", expand=True)
+         body = tk.Frame(right, bg=CARD_BG)
+-        body.pack(fill="both", expand=True, padx=20, pady=20)
++        body.pack(fill="both", expand=True, padx=px(20), pady=px(16))
+ 
+         self.s_hint_var = tk.StringVar(value="")
+         row = tk.Frame(body, bg=CARD_BG)
+-        row.pack(side="bottom", fill="x", pady=(16, 0))
++        row.pack(side="bottom", fill="x", pady=(px(12), 0))
+         hint_stat = tk.Label(
+             body, textvariable=self.s_hint_var, font=SRC_FONT, fg=SUB_FG,
+-            bg=CARD_BG, anchor="w", justify="left", wraplength=380,
++            bg=CARD_BG, anchor="w", justify="left", wraplength=px(356),
+         )
+-        hint_stat.pack(side="bottom", fill="x", pady=(8, 0))
++        hint_stat.pack(side="bottom", fill="x", pady=(px(6), 0))
+ 
+         def _recolor_hint(*_a):
+             try:
+                 v = self.s_hint_var.get()
+                 hint_stat.configure(
+-                    fg="#C0392B" if v.startswith("读配置失败") else SUB_FG
++                    fg=ERROR_FG if v.startswith("读配置失败") else SUB_FG
+                 )
+             except Exception:
+                 pass
+@@ -192,9 +230,10 @@ class SettingsWindowMixin:
+                 body, text=text, font=LBL_FONT, fg=FAINT_FG, bg=CARD_BG, anchor="w"
+             )
+ 
+-        def 输入框(var, show=None):
++        def 输入框(var, show=None, parent=None):
+             e = tk.Entry(
+-                body, textvariable=var, font=FONT, relief="flat", bd=0,
++                parent if parent is not None else body,
++                textvariable=var, font=FONT, relief="flat", bd=0,
+                 highlightthickness=1, highlightbackground=EDGE, highlightcolor=ACCENT,
+                 bg=CARD_BG, fg=MAIN_FG, insertbackground=MAIN_FG,
+             )
+@@ -204,28 +243,49 @@ class SettingsWindowMixin:
+ 
+         字段名("地址").pack(fill="x")
+         self.s_url_var = tk.StringVar()
+-        输入框(self.s_url_var).pack(fill="x", pady=(4, 0), ipady=4)
+-        提示("如 https://api.deepseek.com/v1").pack(fill="x", pady=(4, 0))
++        输入框(self.s_url_var).pack(fill="x", pady=(px(4), 0), ipady=px(4))
++        提示("如 https://api.deepseek.com/v1").pack(fill="x", pady=(px(3), 0))
+ 
+-        字段名("钥匙").pack(fill="x", pady=(12, 0))
++        字段名("钥匙").pack(fill="x", pady=(px(9), 0))
+         self.s_key_var = tk.StringVar()
+-        输入框(self.s_key_var, show="*").pack(fill="x", pady=(4, 0), ipady=4)
+-        提示("去官网申请，粘贴到这里").pack(fill="x", pady=(4, 0))
++        钥匙行 = tk.Frame(body, bg=CARD_BG)
++        钥匙行.pack(fill="x", pady=(px(4), 0))
++        self.s_key_entry = 输入框(self.s_key_var, show="*", parent=钥匙行)
++        self.s_key_entry.pack(side="left", fill="x", expand=True, ipady=px(4))
++        self._key_shown = False
++        self.key_toggle = tk.Button(
++            钥匙行, text="显示", command=self._toggle_key_show,
++            relief="flat", bd=0, highlightthickness=0, cursor="hand2",
++            takefocus=0, bg=CARD_BG, fg=SUB_FG, activebackground=HOVER_BG,
++            activeforeground=SUB_FG, font=("微软雅黑", 9), width=5, padx=px(2),
++        )
++        self.key_toggle.pack(side="right", padx=(px(6), 0), fill="y")
++        提示("去官网申请，粘贴到这里").pack(fill="x", pady=(px(3), 0))
+ 
+-        字段名("模型").pack(fill="x", pady=(12, 0))
++        字段名("模型").pack(fill="x", pady=(px(9), 0))
+         self.s_model_var = tk.StringVar()
+-        输入框(self.s_model_var).pack(fill="x", pady=(4, 0), ipady=4)
+-        提示("如 deepseek-flash，照文档抄").pack(fill="x", pady=(4, 0))
++        输入框(self.s_model_var).pack(fill="x", pady=(px(4), 0), ipady=px(4))
++        提示("如 deepseek-flash，照文档抄").pack(fill="x", pady=(px(3), 0))
+ 
+-        字段名("翻译要求（想让它怎么翻就怎么写）").pack(fill="x", pady=(12, 0))
++        字段名("翻译要求（想让它怎么翻就怎么写）").pack(fill="x", pady=(px(9), 0))
+         self.s_prompt_text = tk.Text(
+-            body, height=5, font=SRC_FONT, wrap="word",
++            body, height=4, width=1, font=SRC_FONT, wrap="word",
+             relief="flat", bd=0, highlightthickness=1,
+             highlightbackground=EDGE, highlightcolor=ACCENT,
+             bg=CARD_BG, fg=MAIN_FG, insertbackground=MAIN_FG,
+-            padx=6, pady=4,
++            padx=px(6), pady=px(4),
+         )
+-        self.s_prompt_text.pack(fill="both", expand=True, pady=(4, 0))
++        self.s_prompt_text.pack(fill="both", expand=True, pady=(px(4), 0))
++
++        for _变量 in (self.s_url_var, self.s_key_var, self.s_model_var):
++            try:
++                _变量.trace_add("write", self._mark_dirty)
++            except Exception:
++                pass
++        try:
++            self.s_prompt_text.bind("<<Modified>>", self._mark_prompt_dirty)
++        except Exception:
++            pass
+ 
+         try:
+             self._s_save_imgs = {
+@@ -240,7 +300,7 @@ class SettingsWindowMixin:
+             relief="flat", bd=0, highlightthickness=0, cursor="hand2",
+             takefocus=0, bg=CARD_BG, fg="#FFFFFF",
+             activebackground=CARD_BG, activeforeground="#FFFFFF",
+-            font=FONT, width=88, height=32, padx=0, pady=0,
++            font=FONT, width=px(88), height=px(32), padx=0, pady=0,
+         )
+         if not self._s_save_imgs:
+             try:
+@@ -265,7 +325,7 @@ class SettingsWindowMixin:
+             relief="flat", bd=0, highlightthickness=0, cursor="hand2",
+             takefocus=0, bg=CARD_BG, fg=MAIN_FG,
+             activebackground=CARD_BG, activeforeground=MAIN_FG,
+-            font=FONT, width=88, height=32, padx=0, pady=0,
++            font=FONT, width=px(88), height=px(32), padx=0, pady=0,
+         )
+         if not self._s_del_imgs:
+             try:
+@@ -274,16 +334,138 @@ class SettingsWindowMixin:
+                 )
+             except Exception:
+                 pass
+-        del_btn.pack(side="right", padx=(0, 8))
++        del_btn.pack(side="right", padx=(0, px(8)))
+         _bind_hover(del_btn, self._s_del_imgs)
+ 
++        try:
++            self._s_test_imgs = {
++                k: _make_secondary_button_image(k, 96, 32)
++                for k in ("normal", "hover", "press")
++            }
++        except Exception:
++            self._s_test_imgs = {}
++        self.test_btn = tk.Button(
++            row, text="测试连接", command=self._settings_test,
++            image=self._s_test_imgs.get("normal"), compound="center",
++            relief="flat", bd=0, highlightthickness=0, cursor="hand2",
++            takefocus=0, bg=CARD_BG, fg=MAIN_FG,
++            activebackground=CARD_BG, activeforeground=MAIN_FG,
++            font=FONT, width=px(96), height=px(32), padx=0, pady=0,
++        )
++        if not self._s_test_imgs:
++            try:
++                self.test_btn.configure(
++                    image="", bg=HOVER_BG, activebackground="#E6E9EF"
++                )
++            except Exception:
++                pass
++        self.test_btn.pack(side="right", padx=(0, px(8)))
++        _bind_hover(self.test_btn, self._s_test_imgs)
++
+         self._refresh_settings_list()
+ 
+         try:
+             win.update_idletasks()
+-            高 = max(480, win.winfo_reqheight())
+-            高 = min(高, win.winfo_screenheight() - 100)
+-            win.geometry(f"620x{高}")
++            高 = max(px(470), win.winfo_reqheight())
++            高 = min(高, win.winfo_screenheight() - px(100))
++            win.geometry(f"{px(620)}x{高}")
++        except Exception:
++            pass
++
++    def _apply_dark_titlebar(self, win):
++        """让系统标题栏跟随深色：先允许本窗用深色，再设 DWM 属性（20=Win10 20H1+，19=更早）。"""
++        try:
++            import ctypes
++
++            win.update_idletasks()
++            hwnd = ctypes.windll.user32.GetAncestor(win.winfo_id(), 2)
++            if not hwnd:
++                return
++            try:
++                ctypes.WinDLL("uxtheme.dll")[133](hwnd, True)  # AllowDarkModeForWindow
++            except Exception:
++                pass
++            值 = ctypes.c_int(1)
++            for 属性 in (20, 19):
++                try:
++                    结果 = ctypes.windll.dwmapi.DwmSetWindowAttribute(
++                        hwnd, 属性, ctypes.byref(值), ctypes.sizeof(值)
++                    )
++                except Exception:
++                    continue
++                if 结果 == 0:
++                    break
++        except Exception:
++            pass
++
++    def _toggle_key_show(self):
++        self._key_shown = not getattr(self, "_key_shown", False)
++        try:
++            self.s_key_entry.configure(show="" if self._key_shown else "*")
++            self.key_toggle.configure(text="隐藏" if self._key_shown else "显示")
++        except Exception:
++            pass
++
++    def _settings_test(self):
++        """用右边填的地址/钥匙/模型真发一次最小请求，让用户当场知道能不能用。"""
++        url = self.s_url_var.get().strip()
++        key = self.s_key_var.get().strip()
++        model = self.s_model_var.get().strip()
++        if not (url and key and model):
++            self.s_hint_var.set("地址、钥匙、模型三样都填好才能测试。")
++            return
++        if _接口chat is None:
++            self.s_hint_var.set("接口模块没准备好，稍后再试。")
++            return
++        try:
++            self.test_btn.configure(state="disabled")
++        except Exception:
++            pass
++        self.s_hint_var.set("正在测试连接…")
++
++        def 收尾(文字):
++            try:
++                self.test_btn.configure(state="normal")
++            except Exception:
++                pass
++            self.s_hint_var.set(文字)
++
++        def 跑():
++            try:
++                回 = _接口chat(url, key, model, "你是连接测试助手。", "只回复两个字：正常")
++                文字 = f"连接正常：模型回复「{(回 or '').strip()[:20]}」"
++            except Exception as e:
++                文字 = "连接失败：" + str(getattr(e, "message", e) or e)
++            try:
++                self.settings_win.after(0, lambda: 收尾(文字))
++            except Exception:
++                pass
++
++        import threading
++
++        threading.Thread(target=跑, daemon=True).start()
++
++    def _on_list_select(self, _e=None):
++        self._apply_list_style()
++        self._on_profile_selected()
++
++    def _apply_list_style(self):
++        """正在用：✓ + 蓝字；选中：浅蓝底。选中项的文字颜色由 selectforeground 决定，
++        所以当选中的就是"正在用"时，把 selectforeground 也调成蓝色。"""
++        try:
++            sel = self.prof_list.curselection()
++            选中 = sel[0] if sel else -1
++            正在用 = getattr(self, "_cur_index", -1)
++            self.prof_list.configure(
++                selectforeground=SELECT_FG_ACCENT if 选中 == 正在用 and 正在用 >= 0 else MAIN_FG
++            )
++            for i, (_名, 配好) in enumerate(getattr(self, "_row_state", [])):
++                if i == 正在用:
++                    self.prof_list.itemconfig(i, foreground=ACCENT_TEXT)
++                elif not 配好:
++                    self.prof_list.itemconfig(i, foreground=FAINT_FG)
++                else:
++                    self.prof_list.itemconfig(i, foreground=MAIN_FG)
+         except Exception:
+             pass
+ 
+@@ -312,29 +494,64 @@ class SettingsWindowMixin:
+         try:
+             self.prof_list.delete(0, "end")
+             self._prof_names = list(names)
++            self._row_state = []
++            self._cur_index = names.index(cur) if cur in names else -1
+             pick = 0
+             for i, name in enumerate(names):
+                 try:
+                     configured = is_profile_configured(name, data) if is_profile_configured else True
+                 except Exception:
+                     configured = True
+-                if not configured:
+-                    label = f"{name} 未配置"
+-                elif name == cur:
+-                    label = f"{name} ✓正在用"
++                if name == cur:
++                    label = f"✓ {name}"
++                elif not configured:
++                    label = f"{name}（未配置）"
+                 else:
+                     label = name
+                 self.prof_list.insert("end", label)
++                self._row_state.append((name, configured))
+                 if name == (select_name or cur):
+                     pick = i
+             if names:
+                 self.prof_list.selection_clear(0, "end")
+                 self.prof_list.selection_set(pick)
+                 self.prof_list.see(pick)
++            self._apply_list_style()
+         finally:
+             self._refreshing_list = False
+         self._fill_settings_fields()
+ 
++    def _settings_close(self, win=None):
++        """关窗：有没保存的改动先问一句，别让用户白填。"""
++        win = win or getattr(self, "settings_win", None)
++        if getattr(self, "_s_dirty", False):
++            try:
++                关 = messagebox.askyesno(
++                    "配置", "还有改动没保存，关掉就丢了。要关掉吗？", parent=win
++                )
++            except Exception:
++                关 = False
++            if not 关:
++                return
++        try:
++            win.destroy()
++        except Exception:
++            pass
++
++    def _mark_dirty(self, *_a):
++        if getattr(self, "_refreshing_fields", False):
++            return
++        self._s_dirty = True
++
++    def _mark_prompt_dirty(self, _e=None):
++        try:
++            if not self.s_prompt_text.edit_modified():
++                return
++            self.s_prompt_text.edit_modified(False)
++        except Exception:
++            pass
++        self._mark_dirty()
++
+     def _fill_settings_fields(self):
+         name = (self._selected_profile_name() or "").strip()
+         if not name:
+@@ -346,11 +563,20 @@ class SettingsWindowMixin:
+         prof = data["profiles"].get(name)
+         if prof is None:
+             return
+-        self.s_url_var.set(prof.get("base_url", ""))
+-        self.s_key_var.set(prof.get("api_key", ""))
+-        self.s_model_var.set(prof.get("model", ""))
+-        self.s_prompt_text.delete("1.0", "end")
+-        self.s_prompt_text.insert("1.0", prof.get("prompt", ""))
++        self._refreshing_fields = True
++        try:
++            self.s_url_var.set(prof.get("base_url", ""))
++            self.s_key_var.set(prof.get("api_key", ""))
++            self.s_model_var.set(prof.get("model", ""))
++            self.s_prompt_text.delete("1.0", "end")
++            self.s_prompt_text.insert("1.0", prof.get("prompt", ""))
++            try:
++                self.s_prompt_text.edit_modified(False)
++            except Exception:
++                pass
++            self._s_dirty = False
++        finally:
++            self._refreshing_fields = False
+ 
+     def _settings_add(self):
+         try:
+@@ -396,6 +622,7 @@ class SettingsWindowMixin:
+             switch_profile(name)
+             self._refresh_settings_list(select_name=name)
+             self._home_status()
++            self._s_dirty = False
+             self.s_hint_var.set(f"已保存并正在用：{name}。")
+         except Exception as e:
+             self.s_hint_var.set(str(e))
+@@ -429,6 +656,16 @@ class SettingsWindowMixin:
+         if not name:
+             self.s_hint_var.set("先在左边点一个方案再删除。")
+             return
++        try:
++            确认 = messagebox.askyesno(
++                "删除方案",
++                f"确定删除「{name}」吗？删了要重新填地址和钥匙。",
++                parent=self.settings_win,
++            )
++        except Exception:
++            确认 = False
++        if not 确认:
++            return
+         try:
+             cur = delete_profile(name)
+             self._refresh_settings_list(select_name=cur)
+diff --git a/translator_theme.py b/translator_theme.py
+index c932571..806fbe3 100644
+--- a/translator_theme.py
++++ b/translator_theme.py
+@@ -5,8 +5,11 @@
+ [PROTOCOL] 纯搬运 app.py 现有代码，不改逻辑；不依赖本项目其他模块
+ """
+ 
++import os
+ import tkinter as tk
+ 
++from translator_scale import UI_SCALE, px
++
+ try:
+     from PIL import Image, ImageDraw, ImageFont, ImageTk
+     HAS_PIL = True
+@@ -19,26 +22,99 @@ except Exception:
+ 
+ FONT = ("微软雅黑", 11)
+ SRC_FONT = ("微软雅黑", 10)
++EN_FONT = ("Segoe UI", 10)
+ LBL_FONT = ("微软雅黑", 8)
+ TITLE_FONT = ("微软雅黑", 10)
+ WORD_FONT = ("微软雅黑", 13, "bold")
+-PHON_FONT = ("微软雅黑", 10)
++PHON_FONT = ("Segoe UI", 10)
+ POS_FONT = ("微软雅黑", 10, "bold")
+-MAIN_FG = "#14171A"
+-SUB_FG = "#5B6470"
+-FAINT_FG = "#8A94A3"
+-LINE = "#EBEEF2"
+-CARD_BG = "#FFFFFF"
++def _系统是深色():
++    """读 Windows 的"应用使用浅色主题"开关；读不到就当浅色。"""
++    try:
++        import winreg
++
++        k = winreg.OpenKey(
++            winreg.HKEY_CURRENT_USER,
++            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
++        )
++        try:
++            v, _ = winreg.QueryValueEx(k, "AppsUseLightTheme")
++        finally:
++            winreg.CloseKey(k)
++        return int(v) == 0
++    except Exception:
++        return False
++
++
++_强制 = os.environ.get("TRANSLATOR_THEME", "").strip().lower()
++DARK = _强制 == "dark" or (_强制 != "light" and _系统是深色())
++
++
++def _启用深色应用模式():
++    """让系统把本进程当深色应用（标题栏、原生对话框跟着变深）。未文档化接口，失败就忽略。"""
++    try:
++        import ctypes
++
++        ctypes.WinDLL("uxtheme.dll")[135](2)  # SetPreferredAppMode(ForceDark)
++    except Exception:
++        pass
++
++
++if DARK:
++    _启用深色应用模式()
++
++if DARK:
++    MAIN_FG = "#E8EBEF"
++    SUB_FG = "#AAB3BE"
++    FAINT_FG = "#98A2AF"
++    LINE = "#2E353D"
++    CARD_BG = "#1E2227"
++    EDGE = "#3A424C"
++    HOVER_BG = "#2A3138"
++    ICON_FG = "#A9B3BF"
++    SCROLL_THUMB = "#4A535E"
++    SCROLL_ACTIVE = "#63707E"
++    PAGE_BG = "#16191D"
++    SELECT_BG = "#26313E"
++    SELECT_FG_ACCENT = "#9DBBFF"
++    TIP_BG = "#3B424B"
++    TIP_FG = "#FFFFFF"
++    EXAMPLE_FG = "#AAB3BE"
++    DIV_HOVER = "#4A6A8F"
++    SECONDARY_HOVER = "#333B44"
++    SECONDARY_PRESS = "#3C4650"
++    ACCENT_TEXT = "#9DBBFF"
++    ERROR_FG = "#FF9A8A"
++else:
++    MAIN_FG = "#14171A"
++    SUB_FG = "#5B6470"
++    FAINT_FG = "#6B7686"
++    LINE = "#EBEEF2"
++    CARD_BG = "#FFFFFF"
++    EDGE = "#E6E9EF"
++    HOVER_BG = "#F2F4F7"
++    ICON_FG = "#6F7B8A"
++    SCROLL_THUMB = "#C9D0DA"
++    SCROLL_ACTIVE = "#A9B2BD"
++    PAGE_BG = "#F7F8FA"
++    SELECT_BG = "#E8EFFF"
++    SELECT_FG_ACCENT = "#1D4ED8"
++    TIP_BG = "#2A2F36"
++    TIP_FG = "#FFFFFF"
++    EXAMPLE_FG = "#323130"
++    DIV_HOVER = "#B3D7F5"
++    SECONDARY_HOVER = "#E6E9EF"
++    SECONDARY_PRESS = "#DCE0E6"
++    ACCENT_TEXT = "#2563EB"
++    ERROR_FG = "#C0392B"
++
+ ACCENT = "#2563EB"
+ ACCENT_HOVER = "#1D4ED8"
+ ACCENT_PRESS = "#1E40AF"
+-HOVER_BG = "#F2F4F7"
+ KEY_COLOR = "#FF00FE"
+-ICON_FG = "#98A2B0"
+-RADIUS = 12
+-EDGE = "#E6E9EF"
+-PAD_X = 18
+-ICON_BTN = 28
++RADIUS = px(12)
++PAD_X = px(18)
++ICON_BTN = px(28)
+ 
+ 
+ def _hex_to_rgb(颜色):
+@@ -66,6 +142,11 @@ def _make_tray_image():
+     return img
+ 
+ 
++def _make_app_icon():
++    """窗口/任务栏图标：与托盘同一个蓝底白“译”，配置窗标题栏也用它。"""
++    return ImageTk.PhotoImage(_make_tray_image())
++
++
+ def _图标底布(边=32):
+     """透明正方形画布：所有图标共享的 32x32 可点击热区。"""
+     return Image.new("RGBA", (边, 边), (0, 0, 0, 0))
+@@ -79,15 +160,16 @@ def _make_copy_image(边=32):
+     中 = 边 // 2
+     # 后纸（右上）：只描边，不填充
+     d.rounded_rectangle(
+-        [中 - 2, 中 - 9, 中 + 8, 中 + 1], radius=2, outline=灰 + (255,), width=2
++        [中 - px(2), 中 - px(9), 中 + px(8), 中 + px(1)],
++        radius=px(2), outline=灰 + (255,), width=max(1, px(2)),
+     )
+     # 前纸（左下）：白底填充 + 描边，盖住后纸的交叠处
+     d.rounded_rectangle(
+-        [中 - 8, 中 - 3, 中 + 2, 中 + 9],
+-        radius=2,
+-        fill=(255, 255, 255, 255),
++        [中 - px(8), 中 - px(3), 中 + px(2), 中 + px(9)],
++        radius=px(2),
++        fill=_hex_to_rgb(CARD_BG) + (255,),
+         outline=灰 + (255,),
+-        width=2,
++        width=max(1, px(2)),
+     )
+     return ImageTk.PhotoImage(画)
+ 
+@@ -98,9 +180,10 @@ def _make_close_image(边=32):
+     d = ImageDraw.Draw(画)
+     灰 = _hex_to_rgb(ICON_FG)
+     中 = 边 // 2
+-    半 = 5
+-    d.line([中 - 半, 中 - 半, 中 + 半, 中 + 半], fill=灰 + (255,), width=2, joint="curve")
+-    d.line([中 + 半, 中 - 半, 中 - 半, 中 + 半], fill=灰 + (255,), width=2, joint="curve")
++    半 = px(5)
++    线宽 = max(1, px(2))
++    d.line([中 - 半, 中 - 半, 中 + 半, 中 + 半], fill=灰 + (255,), width=线宽, joint="curve")
++    d.line([中 + 半, 中 - 半, 中 - 半, 中 + 半], fill=灰 + (255,), width=线宽, joint="curve")
+     return ImageTk.PhotoImage(画)
+ 
+ 
+@@ -111,10 +194,10 @@ def _make_chevron_image(展开=False, 边=32):
+     灰 = _hex_to_rgb(ICON_FG)
+     中 = 边 // 2
+     if 展开:
+-        点 = [(中 - 5, 中 + 3), (中, 中 - 2), (中 + 5, 中 + 3)]
++        点 = [(中 - px(5), 中 + px(3)), (中, 中 - px(2)), (中 + px(5), 中 + px(3))]
+     else:
+-        点 = [(中 - 5, 中 - 3), (中, 中 + 2), (中 + 5, 中 - 3)]
+-    d.line(点, fill=灰 + (255,), width=2, joint="curve")
++        点 = [(中 - px(5), 中 - px(3)), (中, 中 + px(2)), (中 + px(5), 中 - px(3))]
++    d.line(点, fill=灰 + (255,), width=max(1, px(2)), joint="curve")
+     return ImageTk.PhotoImage(画)
+ 
+ 
+@@ -139,14 +222,15 @@ def _make_pin_image(钉住=False, 边=32):
+     d = ImageDraw.Draw(画)
+     色 = _hex_to_rgb(ACCENT) if 钉住 else _hex_to_rgb(ICON_FG)
+     中 = 边 // 2
+-    头 = [中 + 1, 中 - 11, 中 + 9, 中 - 3]
++    头 = [中 + px(1), 中 - px(11), 中 + px(9), 中 - px(3)]
++    线宽 = max(1, px(2))
+     if 钉住:
+-        d.ellipse(头, fill=色 + (255,), outline=色 + (255,), width=2)
++        d.ellipse(头, fill=色 + (255,), outline=色 + (255,), width=线宽)
+     else:
+-        d.ellipse(头, outline=色 + (255,), width=2)
++        d.ellipse(头, outline=色 + (255,), width=线宽)
+     d.line(
+-        [中 + 3, 中 - 4, 中 - 6, 中 + 8],
+-        fill=色 + (255,), width=2, joint="curve",
++        [中 + px(3), 中 - px(4), 中 - px(6), 中 + px(8)],
++        fill=色 + (255,), width=线宽, joint="curve",
+     )
+     return ImageTk.PhotoImage(画)
+ 
+@@ -155,29 +239,30 @@ def _make_gear_image(边=32):
+     """齿轮：18px 外径、6 齿、机身 r=6.5；16px/8 齿在小尺寸下会糊成一团。"""
+     画 = _图标底布(边)
+     d = ImageDraw.Draw(画)
+-    灰 = _hex_to_rgb(SUB_FG)
++    灰 = _hex_to_rgb(ICON_FG)
+     中 = 边 / 2.0
+     import math
+ 
+-    外 = 9.0  # 18px 外径 / 2
+-    根 = 5.6  # 齿根（机身边缘附近）
++    外 = px(9.0)  # 18px 外径 / 2
++    根 = px(5.6)  # 齿根（机身边缘附近）
++    线宽 = max(1, px(2))
+     for i in range(6):
+         角 = math.pi / 3 * i
+         x1, y1 = 中 + 根 * math.cos(角), 中 + 根 * math.sin(角)
+         x2, y2 = 中 + 外 * math.cos(角), 中 + 外 * math.sin(角)
+-        d.line([x1, y1, x2, y2], fill=灰 + (255,), width=3)
+-    机身 = 6.5
++        d.line([x1, y1, x2, y2], fill=灰 + (255,), width=max(1, px(3)))
++    机身 = px(6.5)
+     d.ellipse(
+         [中 - 机身, 中 - 机身, 中 + 机身, 中 + 机身],
+-        fill=(255, 255, 255, 255),
++        fill=_hex_to_rgb(CARD_BG) + (255,),
+         outline=灰 + (255,),
+-        width=2,
++        width=线宽,
+     )
+-    孔 = 2.3
++    孔 = px(2.3)
+     d.ellipse(
+         [中 - 孔, 中 - 孔, 中 + 孔, 中 + 孔],
+         outline=灰 + (255,),
+-        width=2,
++        width=线宽,
+     )
+     return ImageTk.PhotoImage(画)
+ 
+@@ -187,6 +272,7 @@ def _make_primary_button_image(状态="normal", 宽=96, 高=32, 半径=8):
+     色 = {"normal": ACCENT, "hover": ACCENT_HOVER, "press": ACCENT_PRESS}.get(
+         状态, ACCENT
+     )
++    宽, 高, 半径 = px(宽), px(高), px(半径)
+     超 = 3
+     大 = (宽 * 超, 高 * 超)
+     画 = Image.new("RGBA", 大, (0, 0, 0, 0))
+@@ -200,9 +286,10 @@ def _make_primary_button_image(状态="normal", 宽=96, 高=32, 半径=8):
+ 
+ def _make_secondary_button_image(状态="normal", 宽=96, 高=32, 半径=8):
+     """次要按钮底图：圆角浅灰块；+ 新方案 / 删除 共用。"""
+-    色 = {"normal": HOVER_BG, "hover": "#E6E9EF", "press": "#DCE0E6"}.get(
++    色 = {"normal": HOVER_BG, "hover": SECONDARY_HOVER, "press": SECONDARY_PRESS}.get(
+         状态, HOVER_BG
+     )
++    宽, 高, 半径 = px(宽), px(高), px(半径)
+     超 = 3
+     大 = (宽 * 超, 高 * 超)
+     画 = Image.new("RGBA", 大, (0, 0, 0, 0))
+@@ -236,19 +323,20 @@ def _in_cap(角, px, py, 边, 半径):
+     return px >= 边 - 半径 and py >= 边 - 半径
+ 
+ 
+-def _corner_kind(角, x, y, 边=13, 半径=RADIUS, 超=4):
++def _corner_kind(角, x, y, 边=px(13), 半径=RADIUS, 超=4):
+     """单个低分辨率像素是 transparent/white/edge（纯计算，不碰 PIL/Tk，可单测）。
+ 
+-    圆弧：圆心见 _corner_center，半径=半径；描边半宽 0.6px，超采样抗锯齿。
++    圆弧：圆心见 _corner_center，半径=半径；描边半宽 0.6px（随缩放放大），超采样抗锯齿。
+     直边：卡片边界上的那一行/列（非透明部分）固定画 1px EDGE，
+     与卡片 Frame 的 highlight 边框无缝相接。
+     """
+     import math
+ 
+     cx, cy = _corner_center(角, 边, 半径)
+-    px = x + 0.5
+-    py = y + 0.5
+-    if _in_cap(角, px, py, 边, 半径):
++    中心x = x + 0.5
++    中心y = y + 0.5
++    半线 = 0.6 * UI_SCALE
++    if _in_cap(角, 中心x, 中心y, 边, 半径):
+         命中 = 0
+         描边 = 0
+         for j in range(超):
+@@ -256,7 +344,7 @@ def _corner_kind(角, x, y, 边=13, 半径=RADIUS, 超=4):
+                 sx = x + (i + 0.5) / 超
+                 sy = y + (j + 0.5) / 超
+                 d = math.hypot(sx - cx, sy - cy)
+-                if abs(d - 半径) <= 0.6:
++                if abs(d - 半径) <= 半线:
+                     描边 += 1
+                 elif d < 半径:
+                     命中 += 1
+@@ -281,7 +369,7 @@ def _corner_kind(角, x, y, 边=13, 半径=RADIUS, 超=4):
+     return "white"
+ 
+ 
+-def _make_corner_image(角, 边=13, 半径=RADIUS):
++def _make_corner_image(角, 边=px(13), 半径=RADIUS):
+     """圆角遮罩：角外透明、角内填白、圆弧 1px EDGE 描边，直边各留 1px EDGE。
+ 
+     角 ∈ {"tl", "tr", "bl", "br"}；直边描边与卡片 highlight 边框对齐，
+@@ -296,14 +384,14 @@ def _make_corner_image(角, 边=13, 半径=RADIUS):
+             if 类 == "edge":
+                 像素[x, y] = 边色 + (255,)
+             elif 类 == "white":
+-                像素[x, y] = (255, 255, 255, 255)
++                像素[x, y] = _hex_to_rgb(CARD_BG) + (255,)
+     return ImageTk.PhotoImage(画)
+ 
+ 
+ def _make_tip_image(文本):
+     """深色圆角气泡：整块用 PIL 画，边角靠色键抠掉，返回 PhotoImage。"""
+     try:
+-        font = ImageFont.truetype("msyh.ttc", 12)
++        font = ImageFont.truetype("msyh.ttc", px(12))
+     except Exception:
+         font = ImageFont.load_default()
+     try:
+@@ -314,7 +402,7 @@ def _make_tip_image(文本):
+         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+     else:
+         tw, th = 72, 15
+-    pad_x, pad_y = 8, 4
++    pad_x, pad_y = px(8), px(4)
+     W = max(1, tw + pad_x * 2)
+     H = max(1, th + pad_y * 2)
+     超 = 4
+@@ -322,26 +410,26 @@ def _make_tip_image(文本):
+     # 而色键只能抠纯透明，所以覆盖过半才留，否则全透。
+     遮 = Image.new("L", (W * 超, H * 超), 0)
+     ImageDraw.Draw(遮).rounded_rectangle(
+-        [0, 0, W * 超 - 1, H * 超 - 1], radius=6 * 超, fill=255
++        [0, 0, W * 超 - 1, H * 超 - 1], radius=px(6) * 超, fill=255
+     )
+     遮 = 遮.resize((W, H), Image.LANCZOS).point(lambda v: 255 if v >= 128 else 0)
+     画 = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+     画.paste(
+-        Image.new("RGBA", (W, H), _hex_to_rgb("#2A2F36") + (255,)), (0, 0), 遮
++        Image.new("RGBA", (W, H), _hex_to_rgb(TIP_BG) + (255,)), (0, 0), 遮
+     )
+     d = ImageDraw.Draw(画)
+     tx = pad_x - (bbox[0] if bbox else 0)
+     ty = pad_y - (bbox[1] if bbox else 0)
+     try:
+-        d.text((tx, ty), 文本, fill=(255, 255, 255, 255), font=font)
++        d.text((tx, ty), 文本, fill=_hex_to_rgb(TIP_FG) + (255,), font=font)
+     except Exception:
+-        d.text((pad_x, pad_y), 文本, fill=(255, 255, 255, 255), font=font)
++        d.text((pad_x, pad_y), 文本, fill=_hex_to_rgb(TIP_FG) + (255,), font=font)
+     return ImageTk.PhotoImage(画)
+ 
+ 
+ class _Tip:
+-    """跟鼠标的小提示：图标旁边浮一句，移开或 1.5 秒后就没。"""
+-    _深底 = "#2A2F36"
++    """跟鼠标的小提示：图标旁边浮一句，移开就收；8 秒只是兜底。"""
++    _深底 = TIP_BG
+ 
+     def __init__(self, 根):
+         self._根 = 根
+@@ -374,20 +462,20 @@ class _Tip:
+                         pass
+                     标 = tk.Label(
+                         w, text=文本, font=("微软雅黑", 9),
+-                        foreground="#FFFFFF", background=self._深底,
+-                        bd=0, highlightthickness=0, padx=8, pady=4,
++                        foreground=TIP_FG, background=self._深底,
++                        bd=0, highlightthickness=0, padx=px(8), pady=px(4),
+                     )
+                     标.pack()
+             else:
+                 标 = tk.Label(
+                     w, text=文本, font=("微软雅黑", 9),
+                     foreground="#FFFFFF", background=self._深底,
+-                    bd=0, highlightthickness=0, padx=8, pady=4,
++                    bd=0, highlightthickness=0, padx=px(8), pady=px(4),
+                 )
+                 标.pack()
+-            w.geometry(f"+{int(x) + 14}+{int(y) + 12}")
++            w.geometry(f"+{int(x) + px(14)}+{int(y) + px(12)}")
+             self._窗 = w
+-            self._after = self._根.after(1500, self.hide)
++            self._after = self._根.after(8000, self.hide)
+         except Exception:
+             self._窗 = None
+ 

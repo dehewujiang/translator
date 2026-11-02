@@ -2,6 +2,8 @@
 import sys
 import unittest
 
+from translator_scale import px
+
 try:
     import tkinter as tk
     try:
@@ -43,14 +45,14 @@ class 位置保持(unittest.TestCase):
         屏宽 = 窗.root.winfo_screenwidth()
         窗.popup()
         窗.root.update()
-        self.assertEqual(窗.root.winfo_x(), max(0, 屏宽 - A.WIN_W - 24))
-        self.assertEqual(窗.root.winfo_y(), 48)
+        self.assertEqual(窗.root.winfo_x(), max(0, 屏宽 - A.WIN_W - px(24)))
+        self.assertEqual(窗.root.winfo_y(), px(48))
 
     def test_底边框线在拖拽区之上(self):
         窗 = self._起窗()
         线 = 窗._bottom_line
         区 = 窗._resize_zone
-        self.assertEqual(线.place_info()["y"], str(窗._window_h - 9))
+        self.assertEqual(线.place_info()["y"], str(窗._window_h - px(8) - 1))
         self.assertEqual(
             int(区.place_info()["y"]) + int(区.place_info()["height"]),
             int(线.place_info()["y"]),

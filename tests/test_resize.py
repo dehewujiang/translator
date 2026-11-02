@@ -3,7 +3,10 @@ import unittest
 
 from app import _是否该藏
 from translator_layout import WIN_H, _钳制窗口高度
-from translator_theme import _corner_kind
+from translator_scale import px
+from translator_theme import RADIUS, _corner_kind
+
+边 = px(13)
 
 
 class 高度钳制(unittest.TestCase):
@@ -11,7 +14,7 @@ class 高度钳制(unittest.TestCase):
         self.assertEqual(_钳制窗口高度(100, 1080), WIN_H)
 
     def test_过高钳到屏幕上限(self):
-        上限 = max(WIN_H, min(int(1080 * 0.72), 900))
+        上限 = max(WIN_H, min(int(1080 * 0.72), px(900)))
         self.assertEqual(_钳制窗口高度(2000, 1080), 上限)
 
     def test_区间内原样返回(self):
@@ -20,18 +23,20 @@ class 高度钳制(unittest.TestCase):
 
 class 四角对称(unittest.TestCase):
     def test_外角透明内里白(self):
-        self.assertEqual(_corner_kind("tl", 0, 0), "transparent")
-        self.assertEqual(_corner_kind("tl", 12, 12), "white")
-        self.assertEqual(_corner_kind("br", 12, 12), "transparent")
-        self.assertEqual(_corner_kind("br", 0, 0), "white")
+        末 = 边 - 1
+        self.assertEqual(_corner_kind("tl", 0, 0, 边=边), "transparent")
+        self.assertEqual(_corner_kind("tl", 末, 末, 边=边), "white")
+        self.assertEqual(_corner_kind("br", 末, 末, 边=边), "transparent")
+        self.assertEqual(_corner_kind("br", 0, 0, 边=边), "white")
 
     def test_四角镜像对称(self):
-        for y in range(13):
-            for x in range(13):
-                基 = _corner_kind("tl", x, y)
-                self.assertEqual(_corner_kind("tr", 12 - x, y), 基, f"tr({12 - x},{y})")
-                self.assertEqual(_corner_kind("bl", x, 12 - y), 基, f"bl({x},{12 - y})")
-                self.assertEqual(_corner_kind("br", 12 - x, 12 - y), 基)
+        末 = 边 - 1
+        for y in range(边):
+            for x in range(边):
+                基 = _corner_kind("tl", x, y, 边=边)
+                self.assertEqual(_corner_kind("tr", 末 - x, y, 边=边), 基, f"tr({末 - x},{y})")
+                self.assertEqual(_corner_kind("bl", x, 末 - y, 边=边), 基, f"bl({x},{末 - y})")
+                self.assertEqual(_corner_kind("br", 末 - x, 末 - y, 边=边), 基)
 
 
 class 钉住逻辑(unittest.TestCase):

@@ -5,7 +5,10 @@
 [PROTOCOL] 纯搬运 app.py 现有代码，不改逻辑；不依赖本项目其他模块
 """
 
+import os
 import tkinter as tk
+
+from translator_scale import UI_SCALE, px
 
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageTk
@@ -19,26 +22,99 @@ except Exception:
 
 FONT = ("微软雅黑", 11)
 SRC_FONT = ("微软雅黑", 10)
+EN_FONT = ("Segoe UI", 10)
 LBL_FONT = ("微软雅黑", 8)
 TITLE_FONT = ("微软雅黑", 10)
 WORD_FONT = ("微软雅黑", 13, "bold")
-PHON_FONT = ("微软雅黑", 10)
+PHON_FONT = ("Segoe UI", 10)
 POS_FONT = ("微软雅黑", 10, "bold")
-MAIN_FG = "#14171A"
-SUB_FG = "#5B6470"
-FAINT_FG = "#8A94A3"
-LINE = "#EBEEF2"
-CARD_BG = "#FFFFFF"
+def _系统是深色():
+    """读 Windows 的"应用使用浅色主题"开关；读不到就当浅色。"""
+    try:
+        import winreg
+
+        k = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+        )
+        try:
+            v, _ = winreg.QueryValueEx(k, "AppsUseLightTheme")
+        finally:
+            winreg.CloseKey(k)
+        return int(v) == 0
+    except Exception:
+        return False
+
+
+_强制 = os.environ.get("TRANSLATOR_THEME", "").strip().lower()
+DARK = _强制 == "dark" or (_强制 != "light" and _系统是深色())
+
+
+def _启用深色应用模式():
+    """让系统把本进程当深色应用（标题栏、原生对话框跟着变深）。未文档化接口，失败就忽略。"""
+    try:
+        import ctypes
+
+        ctypes.WinDLL("uxtheme.dll")[135](2)  # SetPreferredAppMode(ForceDark)
+    except Exception:
+        pass
+
+
+if DARK:
+    _启用深色应用模式()
+
+if DARK:
+    MAIN_FG = "#E8EBEF"
+    SUB_FG = "#AAB3BE"
+    FAINT_FG = "#98A2AF"
+    LINE = "#2E353D"
+    CARD_BG = "#1E2227"
+    EDGE = "#3A424C"
+    HOVER_BG = "#2A3138"
+    ICON_FG = "#A9B3BF"
+    SCROLL_THUMB = "#4A535E"
+    SCROLL_ACTIVE = "#63707E"
+    PAGE_BG = "#16191D"
+    SELECT_BG = "#26313E"
+    SELECT_FG_ACCENT = "#9DBBFF"
+    TIP_BG = "#3B424B"
+    TIP_FG = "#FFFFFF"
+    EXAMPLE_FG = "#AAB3BE"
+    DIV_HOVER = "#4A6A8F"
+    SECONDARY_HOVER = "#333B44"
+    SECONDARY_PRESS = "#3C4650"
+    ACCENT_TEXT = "#9DBBFF"
+    ERROR_FG = "#FF9A8A"
+else:
+    MAIN_FG = "#14171A"
+    SUB_FG = "#5B6470"
+    FAINT_FG = "#6B7686"
+    LINE = "#EBEEF2"
+    CARD_BG = "#FFFFFF"
+    EDGE = "#E6E9EF"
+    HOVER_BG = "#F2F4F7"
+    ICON_FG = "#6F7B8A"
+    SCROLL_THUMB = "#C9D0DA"
+    SCROLL_ACTIVE = "#A9B2BD"
+    PAGE_BG = "#F7F8FA"
+    SELECT_BG = "#E8EFFF"
+    SELECT_FG_ACCENT = "#1D4ED8"
+    TIP_BG = "#2A2F36"
+    TIP_FG = "#FFFFFF"
+    EXAMPLE_FG = "#323130"
+    DIV_HOVER = "#B3D7F5"
+    SECONDARY_HOVER = "#E6E9EF"
+    SECONDARY_PRESS = "#DCE0E6"
+    ACCENT_TEXT = "#2563EB"
+    ERROR_FG = "#C0392B"
+
 ACCENT = "#2563EB"
 ACCENT_HOVER = "#1D4ED8"
 ACCENT_PRESS = "#1E40AF"
-HOVER_BG = "#F2F4F7"
 KEY_COLOR = "#FF00FE"
-ICON_FG = "#98A2B0"
-RADIUS = 12
-EDGE = "#E6E9EF"
-PAD_X = 18
-ICON_BTN = 28
+RADIUS = px(12)
+PAD_X = px(18)
+ICON_BTN = px(28)
 
 
 def _hex_to_rgb(颜色):
@@ -66,6 +142,11 @@ def _make_tray_image():
     return img
 
 
+def _make_app_icon():
+    """窗口/任务栏图标：与托盘同一个蓝底白“译”，配置窗标题栏也用它。"""
+    return ImageTk.PhotoImage(_make_tray_image())
+
+
 def _图标底布(边=32):
     """透明正方形画布：所有图标共享的 32x32 可点击热区。"""
     return Image.new("RGBA", (边, 边), (0, 0, 0, 0))
@@ -79,15 +160,16 @@ def _make_copy_image(边=32):
     中 = 边 // 2
     # 后纸（右上）：只描边，不填充
     d.rounded_rectangle(
-        [中 - 2, 中 - 9, 中 + 8, 中 + 1], radius=2, outline=灰 + (255,), width=2
+        [中 - px(2), 中 - px(9), 中 + px(8), 中 + px(1)],
+        radius=px(2), outline=灰 + (255,), width=max(1, px(2)),
     )
     # 前纸（左下）：白底填充 + 描边，盖住后纸的交叠处
     d.rounded_rectangle(
-        [中 - 8, 中 - 3, 中 + 2, 中 + 9],
-        radius=2,
-        fill=(255, 255, 255, 255),
+        [中 - px(8), 中 - px(3), 中 + px(2), 中 + px(9)],
+        radius=px(2),
+        fill=_hex_to_rgb(CARD_BG) + (255,),
         outline=灰 + (255,),
-        width=2,
+        width=max(1, px(2)),
     )
     return ImageTk.PhotoImage(画)
 
@@ -98,9 +180,10 @@ def _make_close_image(边=32):
     d = ImageDraw.Draw(画)
     灰 = _hex_to_rgb(ICON_FG)
     中 = 边 // 2
-    半 = 5
-    d.line([中 - 半, 中 - 半, 中 + 半, 中 + 半], fill=灰 + (255,), width=2, joint="curve")
-    d.line([中 + 半, 中 - 半, 中 - 半, 中 + 半], fill=灰 + (255,), width=2, joint="curve")
+    半 = px(5)
+    线宽 = max(1, px(2))
+    d.line([中 - 半, 中 - 半, 中 + 半, 中 + 半], fill=灰 + (255,), width=线宽, joint="curve")
+    d.line([中 + 半, 中 - 半, 中 - 半, 中 + 半], fill=灰 + (255,), width=线宽, joint="curve")
     return ImageTk.PhotoImage(画)
 
 
@@ -111,10 +194,10 @@ def _make_chevron_image(展开=False, 边=32):
     灰 = _hex_to_rgb(ICON_FG)
     中 = 边 // 2
     if 展开:
-        点 = [(中 - 5, 中 + 3), (中, 中 - 2), (中 + 5, 中 + 3)]
+        点 = [(中 - px(5), 中 + px(3)), (中, 中 - px(2)), (中 + px(5), 中 + px(3))]
     else:
-        点 = [(中 - 5, 中 - 3), (中, 中 + 2), (中 + 5, 中 - 3)]
-    d.line(点, fill=灰 + (255,), width=2, joint="curve")
+        点 = [(中 - px(5), 中 - px(3)), (中, 中 + px(2)), (中 + px(5), 中 - px(3))]
+    d.line(点, fill=灰 + (255,), width=max(1, px(2)), joint="curve")
     return ImageTk.PhotoImage(画)
 
 
@@ -139,14 +222,15 @@ def _make_pin_image(钉住=False, 边=32):
     d = ImageDraw.Draw(画)
     色 = _hex_to_rgb(ACCENT) if 钉住 else _hex_to_rgb(ICON_FG)
     中 = 边 // 2
-    头 = [中 + 1, 中 - 11, 中 + 9, 中 - 3]
+    头 = [中 + px(1), 中 - px(11), 中 + px(9), 中 - px(3)]
+    线宽 = max(1, px(2))
     if 钉住:
-        d.ellipse(头, fill=色 + (255,), outline=色 + (255,), width=2)
+        d.ellipse(头, fill=色 + (255,), outline=色 + (255,), width=线宽)
     else:
-        d.ellipse(头, outline=色 + (255,), width=2)
+        d.ellipse(头, outline=色 + (255,), width=线宽)
     d.line(
-        [中 + 3, 中 - 4, 中 - 6, 中 + 8],
-        fill=色 + (255,), width=2, joint="curve",
+        [中 + px(3), 中 - px(4), 中 - px(6), 中 + px(8)],
+        fill=色 + (255,), width=线宽, joint="curve",
     )
     return ImageTk.PhotoImage(画)
 
@@ -155,29 +239,30 @@ def _make_gear_image(边=32):
     """齿轮：18px 外径、6 齿、机身 r=6.5；16px/8 齿在小尺寸下会糊成一团。"""
     画 = _图标底布(边)
     d = ImageDraw.Draw(画)
-    灰 = _hex_to_rgb(SUB_FG)
+    灰 = _hex_to_rgb(ICON_FG)
     中 = 边 / 2.0
     import math
 
-    外 = 9.0  # 18px 外径 / 2
-    根 = 5.6  # 齿根（机身边缘附近）
+    外 = px(9.0)  # 18px 外径 / 2
+    根 = px(5.6)  # 齿根（机身边缘附近）
+    线宽 = max(1, px(2))
     for i in range(6):
         角 = math.pi / 3 * i
         x1, y1 = 中 + 根 * math.cos(角), 中 + 根 * math.sin(角)
         x2, y2 = 中 + 外 * math.cos(角), 中 + 外 * math.sin(角)
-        d.line([x1, y1, x2, y2], fill=灰 + (255,), width=3)
-    机身 = 6.5
+        d.line([x1, y1, x2, y2], fill=灰 + (255,), width=max(1, px(3)))
+    机身 = px(6.5)
     d.ellipse(
         [中 - 机身, 中 - 机身, 中 + 机身, 中 + 机身],
-        fill=(255, 255, 255, 255),
+        fill=_hex_to_rgb(CARD_BG) + (255,),
         outline=灰 + (255,),
-        width=2,
+        width=线宽,
     )
-    孔 = 2.3
+    孔 = px(2.3)
     d.ellipse(
         [中 - 孔, 中 - 孔, 中 + 孔, 中 + 孔],
         outline=灰 + (255,),
-        width=2,
+        width=线宽,
     )
     return ImageTk.PhotoImage(画)
 
@@ -187,6 +272,7 @@ def _make_primary_button_image(状态="normal", 宽=96, 高=32, 半径=8):
     色 = {"normal": ACCENT, "hover": ACCENT_HOVER, "press": ACCENT_PRESS}.get(
         状态, ACCENT
     )
+    宽, 高, 半径 = px(宽), px(高), px(半径)
     超 = 3
     大 = (宽 * 超, 高 * 超)
     画 = Image.new("RGBA", 大, (0, 0, 0, 0))
@@ -200,9 +286,10 @@ def _make_primary_button_image(状态="normal", 宽=96, 高=32, 半径=8):
 
 def _make_secondary_button_image(状态="normal", 宽=96, 高=32, 半径=8):
     """次要按钮底图：圆角浅灰块；+ 新方案 / 删除 共用。"""
-    色 = {"normal": HOVER_BG, "hover": "#E6E9EF", "press": "#DCE0E6"}.get(
+    色 = {"normal": HOVER_BG, "hover": SECONDARY_HOVER, "press": SECONDARY_PRESS}.get(
         状态, HOVER_BG
     )
+    宽, 高, 半径 = px(宽), px(高), px(半径)
     超 = 3
     大 = (宽 * 超, 高 * 超)
     画 = Image.new("RGBA", 大, (0, 0, 0, 0))
@@ -236,19 +323,20 @@ def _in_cap(角, px, py, 边, 半径):
     return px >= 边 - 半径 and py >= 边 - 半径
 
 
-def _corner_kind(角, x, y, 边=13, 半径=RADIUS, 超=4):
+def _corner_kind(角, x, y, 边=px(13), 半径=RADIUS, 超=4):
     """单个低分辨率像素是 transparent/white/edge（纯计算，不碰 PIL/Tk，可单测）。
 
-    圆弧：圆心见 _corner_center，半径=半径；描边半宽 0.6px，超采样抗锯齿。
+    圆弧：圆心见 _corner_center，半径=半径；描边半宽 0.6px（随缩放放大），超采样抗锯齿。
     直边：卡片边界上的那一行/列（非透明部分）固定画 1px EDGE，
     与卡片 Frame 的 highlight 边框无缝相接。
     """
     import math
 
     cx, cy = _corner_center(角, 边, 半径)
-    px = x + 0.5
-    py = y + 0.5
-    if _in_cap(角, px, py, 边, 半径):
+    中心x = x + 0.5
+    中心y = y + 0.5
+    半线 = 0.6 * UI_SCALE
+    if _in_cap(角, 中心x, 中心y, 边, 半径):
         命中 = 0
         描边 = 0
         for j in range(超):
@@ -256,7 +344,7 @@ def _corner_kind(角, x, y, 边=13, 半径=RADIUS, 超=4):
                 sx = x + (i + 0.5) / 超
                 sy = y + (j + 0.5) / 超
                 d = math.hypot(sx - cx, sy - cy)
-                if abs(d - 半径) <= 0.6:
+                if abs(d - 半径) <= 半线:
                     描边 += 1
                 elif d < 半径:
                     命中 += 1
@@ -281,7 +369,7 @@ def _corner_kind(角, x, y, 边=13, 半径=RADIUS, 超=4):
     return "white"
 
 
-def _make_corner_image(角, 边=13, 半径=RADIUS):
+def _make_corner_image(角, 边=px(13), 半径=RADIUS):
     """圆角遮罩：角外透明、角内填白、圆弧 1px EDGE 描边，直边各留 1px EDGE。
 
     角 ∈ {"tl", "tr", "bl", "br"}；直边描边与卡片 highlight 边框对齐，
@@ -296,14 +384,14 @@ def _make_corner_image(角, 边=13, 半径=RADIUS):
             if 类 == "edge":
                 像素[x, y] = 边色 + (255,)
             elif 类 == "white":
-                像素[x, y] = (255, 255, 255, 255)
+                像素[x, y] = _hex_to_rgb(CARD_BG) + (255,)
     return ImageTk.PhotoImage(画)
 
 
 def _make_tip_image(文本):
     """深色圆角气泡：整块用 PIL 画，边角靠色键抠掉，返回 PhotoImage。"""
     try:
-        font = ImageFont.truetype("msyh.ttc", 12)
+        font = ImageFont.truetype("msyh.ttc", px(12))
     except Exception:
         font = ImageFont.load_default()
     try:
@@ -314,7 +402,7 @@ def _make_tip_image(文本):
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     else:
         tw, th = 72, 15
-    pad_x, pad_y = 8, 4
+    pad_x, pad_y = px(8), px(4)
     W = max(1, tw + pad_x * 2)
     H = max(1, th + pad_y * 2)
     超 = 4
@@ -322,26 +410,26 @@ def _make_tip_image(文本):
     # 而色键只能抠纯透明，所以覆盖过半才留，否则全透。
     遮 = Image.new("L", (W * 超, H * 超), 0)
     ImageDraw.Draw(遮).rounded_rectangle(
-        [0, 0, W * 超 - 1, H * 超 - 1], radius=6 * 超, fill=255
+        [0, 0, W * 超 - 1, H * 超 - 1], radius=px(6) * 超, fill=255
     )
     遮 = 遮.resize((W, H), Image.LANCZOS).point(lambda v: 255 if v >= 128 else 0)
     画 = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     画.paste(
-        Image.new("RGBA", (W, H), _hex_to_rgb("#2A2F36") + (255,)), (0, 0), 遮
+        Image.new("RGBA", (W, H), _hex_to_rgb(TIP_BG) + (255,)), (0, 0), 遮
     )
     d = ImageDraw.Draw(画)
     tx = pad_x - (bbox[0] if bbox else 0)
     ty = pad_y - (bbox[1] if bbox else 0)
     try:
-        d.text((tx, ty), 文本, fill=(255, 255, 255, 255), font=font)
+        d.text((tx, ty), 文本, fill=_hex_to_rgb(TIP_FG) + (255,), font=font)
     except Exception:
-        d.text((pad_x, pad_y), 文本, fill=(255, 255, 255, 255), font=font)
+        d.text((pad_x, pad_y), 文本, fill=_hex_to_rgb(TIP_FG) + (255,), font=font)
     return ImageTk.PhotoImage(画)
 
 
 class _Tip:
-    """跟鼠标的小提示：图标旁边浮一句，移开或 1.5 秒后就没。"""
-    _深底 = "#2A2F36"
+    """跟鼠标的小提示：图标旁边浮一句，移开就收；8 秒只是兜底。"""
+    _深底 = TIP_BG
 
     def __init__(self, 根):
         self._根 = 根
@@ -374,20 +462,20 @@ class _Tip:
                         pass
                     标 = tk.Label(
                         w, text=文本, font=("微软雅黑", 9),
-                        foreground="#FFFFFF", background=self._深底,
-                        bd=0, highlightthickness=0, padx=8, pady=4,
+                        foreground=TIP_FG, background=self._深底,
+                        bd=0, highlightthickness=0, padx=px(8), pady=px(4),
                     )
                     标.pack()
             else:
                 标 = tk.Label(
                     w, text=文本, font=("微软雅黑", 9),
                     foreground="#FFFFFF", background=self._深底,
-                    bd=0, highlightthickness=0, padx=8, pady=4,
+                    bd=0, highlightthickness=0, padx=px(8), pady=px(4),
                 )
                 标.pack()
-            w.geometry(f"+{int(x) + 14}+{int(y) + 12}")
+            w.geometry(f"+{int(x) + px(14)}+{int(y) + px(12)}")
             self._窗 = w
-            self._after = self._根.after(1500, self.hide)
+            self._after = self._根.after(8000, self.hide)
         except Exception:
             self._窗 = None
 

@@ -2,7 +2,7 @@
 
 [INPUT] 行数、行高、屏幕高等纯数值。
 [OUTPUT] 原文区高度、窗口高度（像素整数）。
-[POS] 纯计算模块；被 app.py 依赖；不 import 本项目任何模块。
+[POS] 纯计算模块；被 app.py 依赖；只 import 环境层 translator_scale（DPI 换算）。
 [PROTOCOL] 原文区 = 标题 + 6 + 文本 + 18 像素空隙；窗口高度按内容行数估算，夹在最小高度和屏幕上限之间。
 
 无边框卡片垂直节奏（外窗 380 宽，上下各 8px 透明边，卡片 364 宽）：
@@ -13,20 +13,25 @@
 顶栏 28px = 内含 28px 图标按钮（ICON_BTN），与 translator_theme.ICON_BTN 同值。
 """
 
-WIN_W, WIN_H = 380, 360
+from translator_scale import px
 
-MARGIN = 8
-TOP_PAD = 12
-HEADER_H = 28
-GAP_AFTER_HEADER = 8
-GAP_BEFORE_DIV = 22
-DIV_H = 9
-GAP_AFTER_DIV = 14
-LABEL_H = 28
-GAP_AFTER_LABEL = 6
-GAP_BEFORE_FOOTER = 10
-FOOTER_H = 32
-BOTTOM_PAD = 18
+# 下面是 96dpi 设计稿数值，统一过 px() 换算成当前屏幕像素。
+WIN_W, WIN_H = px(380), px(360)
+
+MARGIN = px(8)
+TOP_PAD = px(12)
+HEADER_H = px(28)
+GAP_AFTER_HEADER = px(8)
+GAP_BEFORE_DIV = px(22)
+DIV_H = px(9)
+GAP_AFTER_DIV = px(14)
+LABEL_H = px(28)
+GAP_AFTER_LABEL = px(6)
+GAP_BEFORE_FOOTER = px(10)
+FOOTER_H = px(32)
+BOTTOM_PAD = px(18)
+原文标题间隙 = px(6)
+原文底隙 = px(18)
 
 FIXED_CHROME = (
     MARGIN * 2
@@ -46,12 +51,12 @@ FIXED_CHROME = (
 
 def _算原文高度(文本像素, 题高, 行高):
     """原文区 = 标题 + 6 + 文本 + 18 像素空隙；空文本至少留一行。"""
-    return 题高 + 6 + max(int(文本像素), int(行高)) + 18
+    return 题高 + 原文标题间隙 + max(int(文本像素), int(行高)) + 原文底隙
 
 
 def _钳制窗口高度(想要, 屏幕高):
     """把任意高度钳在 [最小高度, 屏幕上限] 之间；拖拽手柄与自动算高共用。"""
-    上限 = max(WIN_H, min(int(屏幕高 * 0.72), 900))
+    上限 = max(WIN_H, min(int(屏幕高 * 0.72), px(900)))
     return max(WIN_H, min(int(想要), 上限))
 
 

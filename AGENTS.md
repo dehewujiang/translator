@@ -12,7 +12,8 @@
 | `translator_settings.py` | 配置层：路径、schema、原子写、DPAPI 加密、旧配置迁移 |
 | `translator_theme.py` | 样子层：颜色字体常量、按钮工厂、小提示、托盘图标；不管业务逻辑 |
 | `translator_layout.py` | 纯计算：窗口宽高、原文区/窗口高度公式；不建窗口 |
-| `translator_settings_window.py` | 配置窗：混入 App 的一坨（列表/回填/新增/保存/切换/删除）；只读 settings 与 theme |
+| `translator_scale.py` | 环境层：导入即声明 DPI 感知；`px()` 把 96dpi 设计值换算成当前像素；字号基准 `tk_scaling()`；零项目依赖 |
+| `translator_settings_window.py` | 配置窗：混入 App 的一坨（列表/回填/新增/保存/切换/删除/测试连接）；只读 settings、theme 与 provider（仅测试连接） |
 | `app.py` | 展示层：组装、触发、剪贴板、翻译流程、渲染、托盘；不判断词句、不拼提示词 |
 | `tests/` | 标准库 unittest，全部离线；跑：`python -m unittest discover -s tests -v` |
 | `docs/architecture-redesign.md` | 目标架构、契约、迁移顺序（第 2–4 步未做）、验收单 |
@@ -20,7 +21,7 @@
 
 ## 依赖方向
 
-`app → core → provider/domain`，不许反向；`app` 与 `core` 都可读 `settings`，`settings` 不依赖本项目其他模块；`app` 还可读 `theme/layout/settings_window`，新三模块不反向依赖 `app`；界面和 core 都不 import requests，不拼 URL，不解析错误文字。
+`app → core → provider/domain`，不许反向；`app` 与 `core` 都可读 `settings`，`settings` 不依赖本项目其他模块；`app` 还可读 `theme/layout/settings_window`，新三模块不反向依赖 `app`；`theme` 与 `layout` 可读 `scale`，`scale` 不依赖任何项目模块；界面和 core 都不 import requests，不拼 URL，不解析错误文字。
 
 ## 交付规矩
 

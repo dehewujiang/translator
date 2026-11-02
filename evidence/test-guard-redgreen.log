@@ -1,0 +1,11 @@
+=== 红：对话框异常时旧代码会 fail-open（删除/关窗仍然执行）===
+FAIL: test_ѯ�ʿ����ʱ���� (tests.test_settings_guard.�ش��쳣·��.test_ѯ�ʿ����ʱ����)
+AssertionError: True is not false : ���ѿ����ȴ�Ѵ��ڹ���
+FAIL: test_ѯ�ʿ����ʱ��ɾ (tests.test_settings_guard.�ش�����.test_ѯ�ʿ����ʱ��ɾ)
+AssertionError: Lists differ: ['����'] != []
+Ran 7 tests in 0.007s
+FAILED (failures=2)
+
+=== 绿：修复后（异常一律按“取消”处理）===
+Ran 7 tests in 0.000s
+OK

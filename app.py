@@ -65,15 +65,21 @@ except Exception:
     HAS_PYSTRAY = False
 
 from translator_theme import (
-    FONT, SRC_FONT, LBL_FONT, WORD_FONT, PHON_FONT, POS_FONT,
-    MAIN_FG, SUB_FG, FAINT_FG, LINE, CARD_BG, EDGE,
-    ACCENT, ACCENT_HOVER, HOVER_BG, KEY_COLOR,
+    FONT, SRC_FONT, LBL_FONT, WORD_FONT, PHON_FONT, POS_FONT, EN_FONT,
+    MAIN_FG, SUB_FG, FAINT_FG, ICON_FG, LINE, CARD_BG, EDGE,
+    ACCENT, ACCENT_HOVER, HOVER_BG, KEY_COLOR, SCROLL_THUMB, SCROLL_ACTIVE,
+    EXAMPLE_FG, DIV_HOVER, ACCENT_TEXT,
     PAD_X, HAS_PIL, ICON_BTN, _Tip, _make_tray_image,
     _make_copy_image, _make_close_image, _make_chevron_image,
     _make_gear_image, _make_grip_image, _make_pin_image,
-    _make_primary_button_image, _make_corner_image,
+    _make_primary_button_image, _make_corner_image, _make_app_icon,
 )
-from translator_layout import WIN_W, WIN_H, _算原文高度, _算窗口高度, _钳制窗口高度
+from translator_layout import (
+    WIN_W, WIN_H, MARGIN, TOP_PAD, GAP_AFTER_HEADER, GAP_BEFORE_DIV, DIV_H,
+    GAP_AFTER_DIV, GAP_AFTER_LABEL, GAP_BEFORE_FOOTER, FOOTER_H, BOTTOM_PAD,
+    _算原文高度, _算窗口高度, _钳制窗口高度,
+)
+from translator_scale import px, tk_scaling
 from translator_settings_window import SettingsWindowMixin
 
 HAS_TRAY = HAS_PYSTRAY and HAS_PIL
@@ -166,6 +172,11 @@ def _是否该藏(钉住, 可见, 配置开, 自家激活, 指针在内):
 class App(SettingsWindowMixin):
     def __init__(self):
         self.root = tk.Tk()
+        try:
+            # 字体跟着系统缩放走，和 px() 同步；声明过 DPI 感知后 Tk 才拿得到真实 DPI
+            self.root.tk.call("tk", "scaling", tk_scaling())
+        except Exception:
+            pass
         self._borderless_ok = True
         self._transparent_ok = True
         try:
@@ -174,9 +185,20 @@ class App(SettingsWindowMixin):
             self._borderless_ok = False
         self.root.geometry(f"{WIN_W}x{WIN_H}")
         self._window_h = WIN_H
+        self._window_w = WIN_W
+        self._width_zones = []
+        self._resize_w = False
+        self._width_x0 = None
+        self._width_w0 = None
         self._place_top_right()
         self.root.attributes("-topmost", True)
         self.root.option_add("*Font", FONT)
+        try:
+            # 配置窗标题栏、任务栏、托盘统一用同一个图标
+            self._app_icon = _make_app_icon()
+            self.root.iconphoto(True, self._app_icon)
+        except Exception:
+            self._app_icon = None
         try:
             self.root.configure(background=KEY_COLOR)
         except Exception:
@@ -230,7 +252,7 @@ class App(SettingsWindowMixin):
         # ---- 白卡片：窗口里唯一的实面，四周 8px 透明边；1px EDGE 描边在白底上划出边界 ----
         self.card = tk.Frame(self.root, background=CARD_BG, bd=0, highlightthickness=1,
                              highlightbackground=EDGE, highlightcolor=EDGE)
-        self.card.pack(padx=8, pady=8, fill="both", expand=True)
+        self.card.pack(padx=MARGIN, pady=MARGIN, fill="both", expand=True)
 
         # ---- 状态条平时不占地方：有字才冒出来，寄在顶栏左侧空位 ----
         self.status_var = tk.StringVar(value="")
@@ -240,7 +262,7 @@ class App(SettingsWindowMixin):
 
         # ---- 顶栏 28px：复制 + 关闭右对齐，状态条居左；整条可拖 ----
         self.header = tk.Frame(self.card, background=CARD_BG, height=ICON_BTN)
-        self.header.pack(fill="x", padx=PAD_X, pady=(12, 0))
+        self.header.pack(fill="x", padx=PAD_X, pady=(TOP_PAD, 0))
         try:
             self.header.pack_propagate(False)
         except Exception:
@@ -275,7 +297,7 @@ class App(SettingsWindowMixin):
             takefocus=0,
             highlightthickness=0,
         )
-        self.close_btn.pack(side="right")
+        self.close_btn.pack(side="right", padx=(px(4), 0))
         self.copy_btn = tk.Button(
             self.header,
             image=self._copy_img,
@@ -290,7 +312,7 @@ class App(SettingsWindowMixin):
             takefocus=0,
             highlightthickness=0,
         )
-        self.copy_btn.pack(side="right", padx=(0, 2))
+        self.copy_btn.pack(side="right", padx=(0, px(8)))
         self.copy_btn.bind("<Enter>", lambda e: self._tip_show("复制译文", e))
         self.copy_btn.bind("<Leave>", self._tip_hide)
         self.close_btn.bind("<Enter>", lambda e: self._tip_show("关闭", e))
@@ -317,13 +339,17 @@ class App(SettingsWindowMixin):
             takefocus=0,
             highlightthickness=0,
         )
-        self.pin_btn.pack(side="right", padx=(0, 2))
+        self.pin_btn.pack(side="right", padx=(0, px(2)))
         self.pin_btn.bind("<Enter>", self._pin_hover_in)
         self.pin_btn.bind("<Leave>", self._pin_hover_out)
 
-        # ---- 译文（上） ----
+        # ---- 译文（上）：外层容器容纳细滚动条 ----
+        self.dst_wrap = tk.Frame(self.card, background=CARD_BG)
+        self.dst_wrap.pack(
+            fill="both", expand=True, padx=PAD_X, pady=(GAP_AFTER_HEADER, 0)
+        )
         self.dst_text = tk.Text(
-            self.card,
+            self.dst_wrap,
             height=5,
             font=FONT,
             wrap="word",
@@ -332,19 +358,50 @@ class App(SettingsWindowMixin):
             highlightthickness=0,
             background=CARD_BG,
             foreground=MAIN_FG,
-            spacing1=4,
-            spacing2=2,
-            spacing3=6,
-            padx=4,
-            pady=2,
+            spacing1=px(4),
+            spacing2=px(2),
+            spacing3=px(6),
+            padx=px(4),
+            pady=px(2),
         )
-        self.dst_text.pack(fill="both", expand=True, padx=PAD_X, pady=(8, 0))
+        self.dst_text.grid(row=0, column=0, sticky="nsew")
+        self.dst_wrap.grid_rowconfigure(0, weight=1)
+        self.dst_wrap.grid_columnconfigure(0, weight=1)
+        self.dst_bar = tk.Frame(
+            self.dst_wrap, bg=CARD_BG, width=px(6), bd=0,
+            highlightthickness=0, cursor="arrow",
+        )
+        self.dst_thumb = tk.Frame(
+            self.dst_bar, bg=SCROLL_THUMB, bd=0, highlightthickness=0,
+            cursor="hand2",
+        )
+        self.dst_thumb.bind("<Enter>", lambda _e: self.dst_thumb.configure(bg=SCROLL_ACTIVE))
+        self.dst_thumb.bind("<Leave>", lambda _e: self.dst_thumb.configure(bg=SCROLL_THUMB))
+        self.dst_bar.bind("<Button-1>", self._bar_jump)
+        self.dst_bar.bind("<B1-Motion>", self._bar_jump)
+        self.dst_thumb.bind("<Button-1>", self._bar_jump)
+        self.dst_thumb.bind("<B1-Motion>", self._bar_jump)
+        self.dst_bar.grid(row=0, column=1, sticky="ns")
+        self.dst_bar.grid_remove()
+        self.dst_text.configure(yscrollcommand=self._on_dst_scroll)
+        self.empty_hint = tk.Label(
+            self.dst_wrap,
+            text="复制英文后轻点 Ctrl\n也可以在下面原文框输入英文",
+            justify="center", font=SRC_FONT, fg=FAINT_FG, bg=CARD_BG,
+        )
+        self.empty_hint.bind(
+            "<Button-1>", lambda _e: (self.src_text.focus_set(), "break")[-1]
+        )
+        try:
+            self.dst_text.configure(state="disabled")
+        except Exception:
+            pass
 
         # 可拖动的细分隔线：平时 1px 淡线，鼠标上去变深，拖它调两边高度
-        self.divider = tk.Frame(self.card, background=CARD_BG, height=9, cursor="sb_v_double_arrow")
-        self.divider.pack(fill="x", pady=(22, 0))
+        self.divider = tk.Frame(self.card, background=CARD_BG, height=DIV_H, cursor="sb_v_double_arrow")
+        self.divider.pack(fill="x", pady=(GAP_BEFORE_DIV, 0))
         self.div_line = tk.Frame(self.divider, background=LINE, height=1)
-        self.div_line.pack(fill="x", padx=PAD_X, pady=4)
+        self.div_line.pack(fill="x", padx=PAD_X, pady=px(4))
         for 部件 in (self.divider, self.div_line):
             部件.bind("<Enter>", self._div_hover_in)
             部件.bind("<Leave>", self._div_hover_out)
@@ -355,7 +412,7 @@ class App(SettingsWindowMixin):
 
         # ---- “原文”行：标签左，箭头右 ----
         self.src_head = tk.Frame(self.card, background=CARD_BG)
-        self.src_head.pack(fill="x", padx=PAD_X, pady=(14, 0))
+        self.src_head.pack(fill="x", padx=PAD_X, pady=(GAP_AFTER_DIV, 0))
         self.src_label = tk.Label(
             self.src_head,
             text="原文",
@@ -393,27 +450,27 @@ class App(SettingsWindowMixin):
         self.src_text = tk.Text(
             self.card,
             height=3,
-            font=SRC_FONT,
+            font=EN_FONT,
             wrap="word",
             relief="flat",
             borderwidth=0,
             highlightthickness=0,
             background=CARD_BG,
             foreground=SUB_FG,
-            spacing1=2,
-            spacing2=2,
-            spacing3=2,
-            padx=4,
-            pady=2,
+            spacing1=px(2),
+            spacing2=px(2),
+            spacing3=px(2),
+            padx=px(4),
+            pady=px(2),
         )
-        self.src_text.pack(fill="x", padx=PAD_X, pady=(6, 0))
+        self.src_text.pack(fill="x", padx=PAD_X, pady=(GAP_AFTER_LABEL, 0))
         self.src_text.bind("<MouseWheel>", lambda 事件: self._滚轮(self.src_text, 事件))
         self.src_text.bind("<Return>", self._on_src_return)
         self.dst_text.bind("<MouseWheel>", lambda 事件: self._滚轮(self.dst_text, 事件))
 
         # ---- 底栏 32px：翻译按钮左锚定，齿轮右贴边 ----
-        self.footer = tk.Frame(self.card, background=CARD_BG, height=32)
-        self.footer.pack(fill="x", padx=PAD_X, pady=(10, 18))
+        self.footer = tk.Frame(self.card, background=CARD_BG, height=FOOTER_H)
+        self.footer.pack(fill="x", padx=PAD_X, pady=(GAP_BEFORE_FOOTER, BOTTOM_PAD))
         try:
             self.footer.pack_propagate(False)
         except Exception:
@@ -439,8 +496,8 @@ class App(SettingsWindowMixin):
             activeforeground="#ffffff",
             font=("微软雅黑", 11),
             cursor="hand2",
-            width=96,
-            height=32,
+            width=px(96),
+            height=px(32),
             takefocus=0,
             highlightthickness=0,
             padx=0,
@@ -460,7 +517,7 @@ class App(SettingsWindowMixin):
         self.translate_btn.bind("<ButtonPress-1>", lambda _e: self._primary_set("press"))
         self.translate_btn.bind("<ButtonRelease-1>", lambda _e: self._primary_set("hover"))
         try:
-            self._gear_img = _make_gear_image(32)
+            self._gear_img = _make_gear_image(px(32))
         except Exception:
             self._gear_img = None
         self.config_btn = tk.Button(
@@ -471,13 +528,13 @@ class App(SettingsWindowMixin):
             relief="flat",
             bd=0,
             bg=CARD_BG,
-            fg=SUB_FG,
+            fg=ICON_FG,
             font=("微软雅黑", 13),
             activebackground=HOVER_BG,
-            activeforeground=SUB_FG,
+            activeforeground=ICON_FG,
             cursor="hand2",
-            width=32,
-            height=32,
+            width=px(32),
+            height=px(32),
             takefocus=0,
             highlightthickness=0,
         )
@@ -487,11 +544,13 @@ class App(SettingsWindowMixin):
 
         self._make_corners()
         self._make_resize_zone()
+        self._make_width_zones()
 
         if not CORE_OK:
-            self.dst_text.insert("1.0", "正在等待核心模块，请稍后再试（不要关闭）。")
+            self._dst_set("正在等待核心模块，请稍后再试（不要关闭）。")
 
         # 初始 360 高可能装不下新字体的 chrome：启动就一次兜底，免得按钮行被挤没
+        self._sync_empty_hint()
         self._ensure_fits()
         self._place_top_right()
 
@@ -749,9 +808,9 @@ class App(SettingsWindowMixin):
             return
         try:
             高 = int(self._window_h)
-            宽 = WIN_W
-            边 = 13
-            外 = 8
+            宽 = int(self._window_w)
+            边 = px(13)
+            外 = MARGIN
             位置 = {
                 "tl": (外, 外),
                 "tr": (宽 - 外 - 边, 外),
@@ -789,7 +848,7 @@ class App(SettingsWindowMixin):
         except Exception:
             self._bottom_line = None
         try:
-            self._grip_img = _make_grip_image(16)
+            self._grip_img = _make_grip_image(px(16))
         except Exception:
             self._grip_img = None
         try:
@@ -825,17 +884,90 @@ class App(SettingsWindowMixin):
             pass
         self._place_resize()
 
+    def _make_width_zones(self):
+        """左右两边可横拖调宽；透明边上看得到 size_we 光标，拖起来和底边一致。"""
+        self._width_zones = []
+        for 边 in ("left", "right"):
+            try:
+                z = tk.Frame(
+                    self.root, background=CARD_BG, bd=0,
+                    highlightthickness=0, cursor="size_we",
+                )
+            except Exception:
+                continue
+            功能 = self._width_press_l if 边 == "left" else self._width_press_r
+            z.bind("<ButtonPress-1>", 功能)
+            z.bind("<B1-Motion>", self._width_drag)
+            z.bind("<ButtonRelease-1>", self._width_release)
+            self._width_zones.append((边, z))
+        self._place_resize()
+
+    def _width_press_l(self, 事件):
+        self._resize_w = True
+        self._width_side = "left"
+        self._width_x0 = float(事件.x_root)
+        self._width_w0 = int(self._window_w)
+        self._width_win_x = int(self.root.winfo_x())
+        self._width_win_y = int(self.root.winfo_y())
+
+    def _width_press_r(self, 事件):
+        self._resize_w = True
+        self._width_side = "right"
+        self._width_x0 = float(事件.x_root)
+        self._width_w0 = int(self._window_w)
+        self._width_win_x = int(self.root.winfo_x())
+        self._width_win_y = int(self.root.winfo_y())
+
+    def _width_drag(self, 事件):
+        if not self._resize_w or self._width_x0 is None or self._width_w0 is None:
+            return
+        try:
+            位移 = float(事件.x_root) - self._width_x0
+            屏宽 = int(self.root.winfo_screenwidth())
+            x0 = int(getattr(self, "_width_win_x", self.root.winfo_x()))
+            y0 = int(getattr(self, "_width_win_y", self.root.winfo_y()))
+            上限 = min(int(屏宽 * 0.6), px(760))
+            if getattr(self, "_width_side", "right") == "right":
+                新宽 = max(px(320), min(int(self._width_w0 + 位移), 上限))
+                新宽 = min(新宽, 屏宽 - x0)
+                新x = x0
+            else:
+                新宽 = max(px(320), min(int(self._width_w0 - 位移), 上限))
+                新x = max(0, x0 + self._width_w0 - 新宽)
+                新宽 = min(新宽, x0 + self._width_w0 - 新x)
+            if 新宽 != self._window_w or 新x != self.root.winfo_x():
+                self._window_w = 新宽
+                self._user_moved = True
+                self.root.geometry(f"{新宽}x{self._window_h}+{新x}+{y0}")
+                self._place_corners()
+                self._place_resize()
+        except Exception:
+            pass
+
+    def _width_release(self, _事件=None):
+        拖动过 = self._resize_w
+        self._resize_w = False
+        self._width_x0 = None
+        self._width_w0 = None
+        if not 拖动过:
+            return
+        try:
+            self._refit()
+            self._place_keep_or_top()
+        except Exception:
+            pass
+
     def _place_resize(self):
         """底边条夹在左右圆角之间，手柄贴右下空隙；窗口变高时跟着走。"""
         try:
             高 = int(self._window_h)
         except Exception:
             return
-        宽 = WIN_W
+        宽 = int(self._window_w)
         try:
             if self._resize_zone is not None:
-                self._resize_zone.place(x=8 + 13, y=高 - 8 - 12,
-                                        width=宽 - 16 - 26, height=11)
+                self._resize_zone.place(x=MARGIN + px(13), y=高 - MARGIN - px(12),
+                                        width=宽 - 2 * MARGIN - px(26), height=px(11))
                 try:
                     self._resize_zone.lift()
                 except Exception:
@@ -844,8 +976,8 @@ class App(SettingsWindowMixin):
             pass
         try:
             if self._bottom_line is not None:
-                self._bottom_line.place(x=8 + 13, y=高 - 8 - 1,
-                                         width=宽 - 16 - 26, height=1)
+                self._bottom_line.place(x=MARGIN + px(13), y=高 - MARGIN - 1,
+                                         width=宽 - 2 * MARGIN - px(26), height=1)
                 try:
                     self._bottom_line.lift()
                 except Exception:
@@ -853,9 +985,25 @@ class App(SettingsWindowMixin):
         except Exception:
             pass
         try:
+            for 边, z in getattr(self, "_width_zones", []):
+                上 = MARGIN + px(13)
+                高边 = max(px(40), 高 - 2 * MARGIN - 2 * px(13))
+                # 透明边上的像素会被 Windows 色键穿透，点不到；
+                # 所以热区放在卡片内部 6px，和卡片同色，看起来没有、点得到。
+                if 边 == "left":
+                    z.place(x=MARGIN + 1, y=上, width=px(6), height=高边)
+                else:
+                    z.place(x=宽 - MARGIN - 1 - px(6), y=上, width=px(6), height=高边)
+                try:
+                    z.lift()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
             if self.grip is not None:
-                self.grip.place(x=宽 - 8 - 18 - 16, y=高 - 8 - 18 + 1,
-                                width=16, height=16)
+                self.grip.place(x=宽 - MARGIN - px(18) - px(16), y=高 - MARGIN - px(18) + 1,
+                                width=px(16), height=px(16))
                 try:
                     self.grip.lift()
                 except Exception:
@@ -882,7 +1030,7 @@ class App(SettingsWindowMixin):
             )
             if 新高 != self._window_h:
                 self._window_h = 新高
-                self.root.geometry(f"{WIN_W}x{新高}")
+                self.root.geometry(f"{self._window_w}x{新高}")
                 self._fit_panes()
                 self._place_corners()
         except Exception:
@@ -895,7 +1043,7 @@ class App(SettingsWindowMixin):
             self.dst_text.configure(height=5)
             self._auto_split()
             self.root.update_idletasks()
-            可用 = int(self._window_h) - 16
+            可用 = int(self._window_h) - 2 * MARGIN
             for 框 in (self.dst_text, self.src_text):
                 while (
                     self.card.winfo_reqheight() > 可用
@@ -915,6 +1063,72 @@ class App(SettingsWindowMixin):
         self._resizing = False
         self._resize_y0 = None
         self._resize_h0 = None
+
+    def _on_dst_scroll(self, 首, 末):
+        """译文超出可视范围才露出细滚动条；没超出就藏起来，少占地方。"""
+        try:
+            首, 末 = float(首), float(末)
+            self.dst_thumb.place(
+                relx=0, rely=首, relwidth=1,
+                relheight=max(0.06, min(1.0, 末 - 首)),
+            )
+            溢出 = 首 > 0.0001 or 末 < 0.9999
+            if not 溢出 and float(末) >= 0.999:
+                溢出 = False
+            露着 = bool(self.dst_bar.winfo_ismapped())
+            if 溢出 and not 露着:
+                self.dst_bar.grid()
+            elif not 溢出 and 露着 and 末 >= 0.9999 and 首 <= 0.0001:
+                self.dst_bar.grid_remove()
+        except Exception:
+            pass
+
+    def _bar_jump(self, 事件):
+        """点/拖轨道：把可视区中心移到指针处。"""
+        try:
+            高 = max(1, self.dst_bar.winfo_height())
+            轨顶 = int(self.dst_bar.winfo_rooty())
+            位置 = max(0.0, min(1.0, (float(事件.y_root) - 轨顶) / 高))
+            首, 末 = self.dst_text.yview()
+            半 = max(0.0, (float(末) - float(首)) / 2)
+            self.dst_text.yview_moveto(max(0.0, min(1.0, 位置 - 半)))
+            return "break"
+        except Exception:
+            return "break"
+
+    def _sync_empty_hint(self):
+        """译文区没字时浮一句引导；有字就收起来。"""
+        try:
+            有字 = bool(self.dst_text.get("1.0", "end").strip())
+            if 有字:
+                self.empty_hint.place_forget()
+            else:
+                self.empty_hint.place(relx=0.5, rely=0.5, anchor="center")
+                self.empty_hint.lift()
+        except Exception:
+            pass
+
+    def _dst_edit(self, 动作):
+        """译文区平时只读（能选中、能复制），写内容时临时解锁。"""
+        try:
+            self.dst_text.configure(state="normal")
+        except Exception:
+            pass
+        try:
+            动作()
+        finally:
+            try:
+                self.dst_text.configure(state="disabled")
+            except Exception:
+                pass
+            self._sync_empty_hint()
+
+    def _dst_set(self, 文本):
+        def 写():
+            self.dst_text.delete("1.0", "end")
+            self.dst_text.insert("1.0", 文本)
+
+        self._dst_edit(写)
 
     def _primary_set(self, 状态):
         try:
@@ -971,8 +1185,8 @@ class App(SettingsWindowMixin):
     def _place_top_right(self):
         try:
             sw = self.root.winfo_screenwidth()
-            x = max(0, sw - WIN_W - 24)
-            self.root.geometry(f"{WIN_W}x{self._window_h}+{x}+48")
+            x = max(0, sw - self._window_w - px(24))
+            self.root.geometry(f"{self._window_w}x{self._window_h}+{x}+{px(48)}")
         except Exception:
             pass
 
@@ -981,12 +1195,12 @@ class App(SettingsWindowMixin):
         if getattr(self, "_user_moved", False):
             try:
                 高 = int(self._window_h)
-                self.root.geometry(f"{WIN_W}x{高}")
+                self.root.geometry(f"{self._window_w}x{高}")
                 try:
                     屏高 = int(self.root.winfo_screenheight())
                     if self.root.winfo_y() + 高 > 屏高:
                         self.root.geometry(
-                            f"{WIN_W}x{高}+{self.root.winfo_x()}+{max(0, 屏高 - 高)}"
+                            f"{self._window_w}x{高}+{self.root.winfo_x()}+{max(0, 屏高 - 高)}"
                         )
                 except Exception:
                     pass
@@ -1339,17 +1553,14 @@ class App(SettingsWindowMixin):
         if self._cancel_event is not None:
             self._cancel_event.set()
         self._cancel_event = None
-        self.dst_text.delete("1.0", "end")
-        self.dst_text.insert("1.0", "翻译中，请稍等…")
+        self._dst_set("翻译中，请稍等…")
         if not CORE_OK or run_intent is None:
             self.popup()
-            self.dst_text.delete("1.0", "end")
-            self.dst_text.insert("1.0", "正在等待核心模块，请稍后再点一次。")
+            self._dst_set("正在等待核心模块，请稍后再点一次。")
             return
         if self._need_config():
             self.popup()
-            self.dst_text.delete("1.0", "end")
-            self.dst_text.insert("1.0", "请先点右上角的配置按钮，填好钥匙并保存，然后再翻译。")
+            self._dst_set("请先点右上角的配置按钮，填好钥匙并保存，然后再翻译。")
             return
         取消 = threading.Event()
         self._cancel_event = 取消
@@ -1386,8 +1597,7 @@ class App(SettingsWindowMixin):
         if self._popup_on_first_chunk:
             self._popup_on_first_chunk = False
             self.popup()
-        self.dst_text.delete("1.0", "end")
-        self.dst_text.insert("1.0", 文本)
+        self._dst_set(文本)
         self.dst_text.see("1.0")
 
     def _finish_intent(self, 请求号, 结果):
@@ -1401,44 +1611,51 @@ class App(SettingsWindowMixin):
         try:
             self.dst_text.tag_config("词", font=WORD_FONT, foreground=MAIN_FG)
             self.dst_text.tag_config("音标", font=PHON_FONT, foreground=FAINT_FG)
-            self.dst_text.tag_config("词性", font=POS_FONT, foreground=ACCENT)
+            self.dst_text.tag_config("词性", font=POS_FONT, foreground=ACCENT_TEXT)
             self.dst_text.tag_config("释义", font=FONT, foreground=MAIN_FG)
-            self.dst_text.tag_config("例英", font=SRC_FONT, foreground="#323130", lmargin1=16, lmargin2=16)
-            self.dst_text.tag_config("例中", font=SRC_FONT, foreground=SUB_FG, lmargin1=16, lmargin2=16)
+            self.dst_text.tag_config("例英", font=EN_FONT, foreground=EXAMPLE_FG, lmargin1=px(16), lmargin2=px(16))
+            self.dst_text.tag_config("例中", font=SRC_FONT, foreground=SUB_FG, lmargin1=px(16), lmargin2=px(16))
         except Exception:
             pass
-        self.dst_text.delete("1.0", "end")
-        try:
-            词 = str(结果.word).strip()
-            英音 = str(结果.uk).strip()
-            美音 = str(结果.us).strip()
-            self.dst_text.insert("end", 词 + "  ", "词")
-            音标行 = " ".join(p for p in [f"英 {英音}" if 英音 else "", f"美 {美音}" if 美音 else ""] if p)
-            if 音标行:
-                self.dst_text.insert("end", 音标行, "音标")
-            self.dst_text.insert("end", "\n\n")
-            序号 = 0
-            for 义项 in (结果.senses or []):
-                词性 = str(义项.get("pos", "")).strip()
-                意思 = [str(m).strip() for m in (义项.get("defs", []) or []) if str(m).strip()]
-                if 词性 or 意思:
-                    if 词性:
-                        self.dst_text.insert("end", 词性 + " ", "词性")
-                    if 意思:
-                        self.dst_text.insert("end", "；".join(意思), "释义")
-                    self.dst_text.insert("end", "\n")
-                for 例 in (义项.get("examples", []) or []):
-                    序号 += 1
-                    英 = str(例.get("en", "")).strip()
-                    中 = str(例.get("zh", "")).strip()
-                    if 英:
-                        self.dst_text.insert("end", f"例{序号}  {英}\n", "例英")
-                    if 中:
-                        self.dst_text.insert("end", f"       {中}\n", "例中")
-                self.dst_text.insert("end", "\n")
-        except Exception:
+
+        def 写():
             self.dst_text.delete("1.0", "end")
-            self.dst_text.insert("1.0", str(结果))
+            try:
+                词 = str(结果.word).strip()
+                英音 = str(结果.uk).strip()
+                美音 = str(结果.us).strip()
+                self.dst_text.insert("end", 词 + "\n", "词")
+                # 音标各自独占一行：挤在一行会在"美"和音标之间断行
+                if 英音:
+                    self.dst_text.insert("end", f"英 {英音}\n", "音标")
+                if 美音:
+                    self.dst_text.insert("end", f"美 {美音}\n", "音标")
+                self.dst_text.insert("end", "\n")
+                序号 = 0
+                for 义项 in (结果.senses or []):
+                    词性 = str(义项.get("pos", "")).strip()
+                    意思 = [str(m).strip() for m in (义项.get("defs", []) or []) if str(m).strip()]
+                    if 词性 or 意思:
+                        if 词性:
+                            self.dst_text.insert("end", 词性 + " ", "词性")
+                        if 意思:
+                            self.dst_text.insert("end", "；".join(意思), "释义")
+                        self.dst_text.insert("end", "\n")
+                    for 例 in (义项.get("examples", []) or []):
+                        序号 += 1
+                        英 = str(例.get("en", "")).strip()
+                        中 = str(例.get("zh", "")).strip()
+                        if 英:
+                            self.dst_text.insert("end", f"例{序号}  {英}\n", "例英")
+                        if 中:
+                            self.dst_text.insert("end", f"       {中}\n", "例中")
+                    self.dst_text.insert("end", "\n")
+            except Exception:
+                self.dst_text.delete("1.0", "end")
+                self.dst_text.insert("1.0", str(结果))
+
+        self._dst_edit(写)
+
         self._source_expanded = False
         self._source_compact_lines = 1
         try:
@@ -1480,7 +1697,7 @@ class App(SettingsWindowMixin):
 
     def _div_hover_in(self, _事件=None):
         try:
-            self.div_line.configure(background="#B3D7F5")
+            self.div_line.configure(background=DIV_HOVER)
         except Exception:
             pass
 
@@ -1518,8 +1735,7 @@ class App(SettingsWindowMixin):
 
     def _show_text(self, 文本):
         self._source_compact_lines = 3
-        self.dst_text.delete("1.0", "end")
-        self.dst_text.insert("1.0", 文本 or "没有拿到翻译结果")
+        self._dst_set(文本 or "没有拿到翻译结果")
         self.dst_text.see("1.0")
         # 先弹出来再分：藏着时量不到高，自动分会被跳过
         self.popup()
